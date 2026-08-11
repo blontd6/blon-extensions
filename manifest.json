@@ -1,0 +1,10 @@
+[
+  {
+    "id": "blon-debug",
+    "name": "Blon Debug",
+    "description": "debug",
+    "author": "blontd6",
+    "version": "1.0",
+    "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/blon-debug.user.js"
+  }
+]
