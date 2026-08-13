@@ -354,13 +354,15 @@
       timer: null,
       spawnSent: false,
       lastSpawnTile: null,
-      justSpawned: false,
+      lastSpawnPickTime: 0,
+      behaviorsInitialized: false,
       lastNukeAttemptTime: 0,
       lastStructureAttemptTime: 0,
       lastEmojiSentTime: new Map(),
       lastGlobalEmojiTime: 0,
       lastDefensePostAttemptTime: 0,
       lastDonateAttemptTime: 0,
+      lastExpandMs: 0,
       botAttackTroopsSent: 0,
       stats: {
         attacksSent: 0,
@@ -413,11 +415,10 @@
         if (!inSpawn && this.spawnSent) {
           this.spawnSent = false;
           this.lastSpawnTile = null;
-          this.justSpawned = true;
         }
 
         if (inSpawn) {
-          if (botCfg.autoSpawn && !this.spawnSent) {
+          if (botCfg.autoSpawn) {
             this.handleAutoSpawn(game);
           }
           updateUI();
@@ -430,16 +431,19 @@
           return;
         }
 
-        if (this.justSpawned) {
-          this.justSpawned = false;
+        if (!this.behaviorsInitialized) {
+          this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
-            const initialTroops = Math.floor(playerTroops(myPlayer) / 2);
-            if (initialTroops >= 1) {
-              if (sendPacket({ type: "attack", targetID: null, troops: initialTroops })) {
+            const burstTroops = Math.floor(playerTroops(myPlayer) / 2);
+            if (burstTroops >= 1) {
+              if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
+                this.lastExpandMs = Date.now();
               }
             }
           }
+          updateUI();
+          return;
         }
 
         this.botAttackTroopsSent = 0;
@@ -456,9 +460,14 @@
       },
 
       handleAutoSpawn(game) {
+        const now = Date.now();
+        const spawnPickInterval = 5000;
+        if (this.spawnSent && now - this.lastSpawnPickTime < spawnPickInterval) return;
+
+        this.lastSpawnPickTime = now;
         const tile = this.pickSpawnTile(game);
         if (tile == null) return;
-        if (this.spawnSent && tile === this.lastSpawnTile) return;
+        if (tile === this.lastSpawnTile) return;
 
         const ok = sendPacket({ type: "spawn", tile });
         if (ok) {
@@ -534,12 +543,15 @@
         }
 
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const expandReserve = maxTroops * expandRatio;
-          if (myTroops > expandReserve) {
+          const expandThrottle = 2500;
+          const now = Date.now();
+          if (now - this.lastExpandMs >= expandThrottle) {
+            const expandReserve = maxTroops * expandRatio;
             const troopsToSend = Math.floor(myTroops - expandReserve);
-            if (troopsToSend >= 1) {
+            if (troopsToSend >= Math.max(1, maxTroops * 0.03)) {
               const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
               if (ok) {
+                this.lastExpandMs = now;
                 this.stats.attacksSent++;
                 this.stats.expandsDone++;
                 this.stats.troopsSentTotal += troopsToSend;
