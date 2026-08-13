@@ -60,9 +60,15 @@
     } catch (e) {}
 
     botCfg.autoEmoji = botCfg.autoEmoji === true;
+    if (api && api.cfg && botCfg.autoEmoji !== true) {
+      api.cfg.autoEmojiReactEnabled = false;
+    }
 
     function saveBotCfg() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(botCfg)); } catch (e) {}
+      if (api && api.cfg && botCfg.autoEmoji !== true) {
+        api.cfg.autoEmojiReactEnabled = false;
+      }
     }
 
     const EMOJI_IDX = {
@@ -240,6 +246,9 @@
     }
 
     function sendPacket(intent) {
+      if (intent && intent.type === "emoji" && botCfg.autoEmoji !== true) {
+        return false;
+      }
       if (typeof api.sendPacket === "function") return api.sendPacket(intent);
       if (typeof api.sendIntent === "function") return api.sendIntent(intent);
       return false;
