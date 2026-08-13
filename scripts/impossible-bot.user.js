@@ -1681,38 +1681,12 @@
             ENABLE AUTOPLAY (Shift+B)
         </button>
 
-        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span style="color:#aaa;font-size:10px;font-weight:700;">STRATEGY PRESET</span>
-                <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:2px 4px;cursor:pointer;">
-                    <option value="v1v1" ${botCfg.activePreset === 'v1v1' || botCfg.mode === '1v1' ? 'selected' : ''}>1v1 Sweaty Meta</option>
-                    <option value="solo" ${botCfg.activePreset === 'solo' || botCfg.mode === 'solo' ? 'selected' : ''}>Solo Impossible AI</option>
-                </select>
-            </div>
-            <div style="display:flex;gap:6px;">
-                <button id="blon-preset-v1v1" style="flex:1;padding:6px 0;background:${botCfg.activePreset === 'v1v1' ? themeColor : '#1a1a1a'};border:1px solid ${botCfg.activePreset === 'v1v1' ? themeColor : '#333'};color:${botCfg.activePreset === 'v1v1' ? '#000' : '#aaa'};font-weight:700;font-size:10px;border-radius:4px;cursor:pointer;transition:all 0.15s;">
-                    1v1 Sweaty Meta
-                </button>
-                <button id="blon-preset-solo" style="flex:1;padding:6px 0;background:${botCfg.activePreset === 'solo' ? themeColor : '#1a1a1a'};border:1px solid ${botCfg.activePreset === 'solo' ? themeColor : '#333'};color:${botCfg.activePreset === 'solo' ? '#000' : '#aaa'};font-weight:700;font-size:10px;border-radius:4px;cursor:pointer;transition:all 0.15s;">
-                    Solo Impossible AI
-                </button>
-            </div>
-        </div>
-
-        <div id="blon-1v1-dashboard" style="background:#0d0d0d;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span style="color:#888;font-size:10px;">Target / Action:</span>
-                <span id="blon-ext-auto-target-text" style="color:#ffcc00;font-weight:700;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">None</span>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;font-size:10px;background:#141414;padding:6px;border-radius:4px;">
-                <div style="color:#888;">Mode: <span id="blon-ext-mode-badge" style="color:#00ff66;font-weight:700;">1v1 Sweaty Meta</span></div>
-                <div style="color:#888;">Opponent: <span id="blon-ext-opp-name" style="color:#fff;font-weight:700;">None</span></div>
-                <div style="color:#888;">Cap: <span id="blon-ext-cap-ratio" style="color:#00ff66;font-weight:700;">100%</span></div>
-                <div style="color:#888;">Attacks: <span id="blon-ext-auto-stat-attacks" style="color:#fff;font-weight:700;">0</span></div>
-                <div style="color:#888;">Builds: <span id="blon-ext-auto-stat-structs" style="color:#ffcc00;font-weight:700;">0</span></div>
-                <div style="color:#888;">Nukes: <span id="blon-ext-auto-stat-nukes" style="color:#ff6666;font-weight:700;">0</span></div>
-                <div style="color:#888;">Naval Flanks: <span id="blon-ext-auto-stat-boats" style="color:#38bdf8;font-weight:700;">0</span></div>
-            </div>
+        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#aaa;font-size:10px;font-weight:700;">STRATEGY PRESET</span>
+            <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:3px 6px;cursor:pointer;">
+                <option value="v1v1" ${botCfg.activePreset === 'v1v1' || botCfg.mode === '1v1' ? 'selected' : ''}>1v1 Sweaty Meta</option>
+                <option value="solo" ${botCfg.activePreset === 'solo' || botCfg.mode === 'solo' ? 'selected' : ''}>Solo Impossible AI</option>
+            </select>
         </div>
 
         <div style="color:${themeColor};font-size:11px;font-weight:700;margin-bottom:8px;">Combat & Expansion</div>
@@ -1844,20 +1818,6 @@
       if (modeSelect) {
         modeSelect.addEventListener("change", (e) => {
           applyPreset(e.target.value);
-        });
-      }
-
-      const btnV1 = panel.querySelector("#blon-preset-v1v1");
-      if (btnV1) {
-        btnV1.addEventListener("click", () => {
-          applyPreset("v1v1");
-        });
-      }
-
-      const btnSolo = panel.querySelector("#blon-preset-solo");
-      if (btnSolo) {
-        btnSolo.addEventListener("click", () => {
-          applyPreset("solo");
         });
       }
 
