@@ -2,13 +2,14 @@
 // @name         Blon Extension: Impossible Bot (Autoplay)
 // @namespace    http://tampermonkey.net/
 // @version      2.1.0
-// @description  Autoplay extension featuring OpenFront 1v1 Sweaty Meta and Solo Impossible AI
+// @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
 // @match        *://*.openfront.io/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
+
 
 
 (function() {
@@ -20,7 +21,7 @@
     const PRESETS = {
       v1v1: {
         id: "v1v1",
-        name: "1v1 Meta (Sweaty)",
+        name: "1v1 Meta",
         mode: "1v1",
         maxCities: 3,
         maxSilos: 1,
@@ -150,32 +151,9 @@
     }
 
     function syncAllUIControls() {
-      const themeColor = api.cfg?.guiColor || "#00ff66";
       const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
-      const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
-
       const modeSelect = document.getElementById("blon-ext-mode-select");
       if (modeSelect) modeSelect.value = is1v1 ? "v1v1" : "solo";
-
-      const modeBadge = document.getElementById("blon-ext-mode-badge");
-      if (modeBadge) {
-        modeBadge.textContent = is1v1 ? "1v1 Sweaty Meta" : (isSolo ? "Solo Impossible AI" : "Custom");
-        modeBadge.style.color = is1v1 ? "#00ff66" : "#38bdf8";
-      }
-
-      const btnV1 = document.getElementById("blon-preset-v1v1");
-      if (btnV1) {
-        btnV1.style.background = is1v1 ? themeColor : "#1a1a1a";
-        btnV1.style.borderColor = is1v1 ? themeColor : "#333";
-        btnV1.style.color = is1v1 ? "#000" : "#aaa";
-      }
-
-      const btnSolo = document.getElementById("blon-preset-solo");
-      if (btnSolo) {
-        btnSolo.style.background = isSolo ? themeColor : "#1a1a1a";
-        btnSolo.style.borderColor = isSolo ? themeColor : "#333";
-        btnSolo.style.color = isSolo ? "#000" : "#aaa";
-      }
 
       const setCb = (id, val) => {
         const el = document.getElementById(id);
@@ -1881,26 +1859,6 @@
       updateUI();
     }
 
-    function updatePresetUI() {
-      const themeColor = api.cfg?.guiColor || "#00ff66";
-      const btnV1 = document.getElementById("blon-preset-v1v1");
-      const btnSolo = document.getElementById("blon-preset-solo");
-
-      if (btnV1) {
-        const active = botCfg.activePreset === "v1v1";
-        btnV1.style.background = active ? themeColor : "#1a1a1a";
-        btnV1.style.borderColor = active ? themeColor : "#333";
-        btnV1.style.color = active ? "#000" : "#aaa";
-      }
-
-      if (btnSolo) {
-        const active = botCfg.activePreset === "solo";
-        btnSolo.style.background = active ? themeColor : "#1a1a1a";
-        btnSolo.style.borderColor = active ? themeColor : "#333";
-        btnSolo.style.color = active ? "#000" : "#aaa";
-      }
-    }
-
     function updateUI() {
       const masterBtn = document.getElementById("blon-ext-auto-master-toggle");
       const isRunning = Engine.running;
@@ -1912,41 +1870,6 @@
         masterBtn.style.color = isRunning ? "#ff6666" : "#000";
         masterBtn.style.borderColor = isRunning ? "#ff4444" : "transparent";
       }
-
-      const tgtEl = document.getElementById("blon-ext-auto-target-text");
-      const oppEl = document.getElementById("blon-ext-opp-name");
-      const capEl = document.getElementById("blon-ext-cap-ratio");
-      const modeBadge = document.getElementById("blon-ext-mode-badge");
-
-      if (modeBadge) {
-        const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
-        const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
-        modeBadge.textContent = is1v1 ? "1v1 Sweaty Meta" : (isSolo ? "Solo Impossible AI" : "Custom");
-        modeBadge.style.color = is1v1 ? "#00ff66" : "#38bdf8";
-      }
-
-      if (tgtEl) tgtEl.textContent = Engine.targetDetail || "None";
-      if (oppEl) oppEl.textContent = Engine.opponentName || "None";
-      if (capEl) {
-        if (Engine.oppTroopCap > 0 && Engine.myTroopCap > 0) {
-          const ratio = Math.round((Engine.myTroopCap / Engine.oppTroopCap) * 100);
-          capEl.textContent = `${ratio}% (${api.fmtNum(Engine.myTroopCap)} vs ${api.fmtNum(Engine.oppTroopCap)})`;
-          capEl.style.color = ratio >= 100 ? "#00ff66" : "#ff9900";
-        } else {
-          capEl.textContent = "100%";
-          capEl.style.color = "#00ff66";
-        }
-      }
-
-      const atkCnt = document.getElementById("blon-ext-auto-stat-attacks");
-      const structCnt = document.getElementById("blon-ext-auto-stat-structs");
-      const nukeCnt = document.getElementById("blon-ext-auto-stat-nukes");
-      const boatCnt = document.getElementById("blon-ext-auto-stat-boats");
-
-      if (atkCnt) atkCnt.textContent = String(Engine.stats.attacksSent);
-      if (structCnt) structCnt.textContent = String(Engine.stats.structuresBuilt);
-      if (nukeCnt) nukeCnt.textContent = String(Engine.stats.nukesLaunched);
-      if (boatCnt) boatCnt.textContent = String(Engine.stats.boatsSent);
     }
 
     function onKeyDown(e) {
@@ -1962,7 +1885,7 @@
       id: "impossible-bot",
       name: "Impossible Bot (Autoplay)",
       version: "2.1.0",
-      description: "Autoplay extension featuring OpenFront 1v1 Sweaty Meta and Solo Impossible AI",
+      description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
       tabContent: renderTab,
