@@ -40,39 +40,81 @@
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(botCfg)); } catch (e) {}
     }
 
-    function getBorderTilesSync(player) {
-      try {
-        if (typeof player.borderTiles === "function") {
-          const res = player.borderTiles();
-          if (res instanceof Set) return res;
-          if (res) return new Set(Array.from(res));
+    function forEachNeighbor(game, tile, fn) {
+      if (typeof game.forEachNeighbor === "function") {
+        game.forEachNeighbor(tile, fn);
+      } else if (typeof game.neighbors === "function") {
+        const list = game.neighbors(tile);
+        if (list) {
+          for (const n of list) fn(n);
         }
-      } catch (e) {}
-      return new Set();
+      }
     }
 
     function getMySmallID(myPlayer) {
       return typeof myPlayer.smallID === "function" ? myPlayer.smallID() : null;
     }
 
-    function getBorderingPlayerIDs(game, myPlayer) {
-      const myID = getMySmallID(myPlayer);
-      if (!myID) return new Map();
-      const map = new Map();
-      const bts = getBorderTilesSync(myPlayer);
+    function getBorderTiles(game, myPlayer) {
+      try {
+        if (typeof myPlayer.borderTiles === "function") {
+          const res = myPlayer.borderTiles();
+          if (res instanceof Set && res.size > 0) return res;
+          if (Array.isArray(res) && res.length > 0) return new Set(res);
+          if (res && res.borderTiles) {
+            const inner = res.borderTiles;
+            if (inner instanceof Set && inner.size > 0) return inner;
+            if (Array.isArray(inner) && inner.length > 0) return new Set(inner);
+          }
+          if (res && typeof res[Symbol.iterator] === "function") {
+            const s = new Set(res);
+            if (s.size > 0) return s;
+          }
+        }
+      } catch (e) {}
 
-      const scanNeighbors = (tile) => {
-        if (typeof game.forEachNeighbor === "function") {
-          game.forEachNeighbor(tile, (n) => {
+      const myID = getMySmallID(myPlayer);
+      if (!myID || !game) return new Set();
+      const set = new Set();
+      try {
+        if (typeof game.forEachTile === "function") {
+          game.forEachTile((tile) => {
             try {
-              const ownerID = game.ownerID(n);
-              if (ownerID && ownerID > 0 && ownerID !== myID && !map.has(ownerID)) {
-                const p = typeof game.playerBySmallID === "function" ? game.playerBySmallID(ownerID) : null;
-                if (p) map.set(ownerID, p);
+              if (game.ownerID(tile) === myID) {
+                let isBorder = false;
+                forEachNeighbor(game, tile, (n) => {
+                  if (isBorder) return;
+                  try {
+                    if (!game.isLand(n) || game.ownerID(n) !== myID) {
+                      isBorder = true;
+                    }
+                  } catch (e) {}
+                });
+                if (isBorder) set.add(tile);
               }
             } catch (e) {}
           });
         }
+      } catch (e) {}
+      return set;
+    }
+
+    function getBorderingPlayerIDs(game, myPlayer) {
+      const myID = getMySmallID(myPlayer);
+      if (!myID) return new Map();
+      const map = new Map();
+      const bts = getBorderTiles(game, myPlayer);
+
+      const scanNeighbors = (tile) => {
+        forEachNeighbor(game, tile, (n) => {
+          try {
+            const ownerID = game.ownerID(n);
+            if (ownerID && ownerID > 0 && ownerID !== myID && !map.has(ownerID)) {
+              const p = typeof game.playerBySmallID === "function" ? game.playerBySmallID(ownerID) : null;
+              if (p) map.set(ownerID, p);
+            }
+          } catch (e) {}
+        });
       };
 
       if (bts.size > 0) {
@@ -88,18 +130,24 @@
     }
 
     function hasBorderWithTerraNullius(game, myPlayer) {
-      const bts = getBorderTilesSync(myPlayer);
+      const myID = getMySmallID(myPlayer);
+      if (!myID || !game) return false;
+      const bts = getBorderTiles(game, myPlayer);
       for (const tile of bts) {
-        if (typeof game.forEachNeighbor === "function") {
-          let found = false;
-          game.forEachNeighbor(tile, (n) => {
-            if (!found && typeof game.isLand === "function" && game.isLand(n) &&
-                typeof game.hasOwner === "function" && !game.hasOwner(n)) {
+        let found = false;
+        forEachNeighbor(game, tile, (n) => {
+          if (found) return;
+          try {
+            if (typeof game.isLand === "function" && !game.isLand(n)) return;
+            const hasOwner = typeof game.hasOwner === "function" ? game.hasOwner(n) : true;
+            const ownerID = typeof game.ownerID === "function" ? game.ownerID(n) : null;
+            if (!hasOwner || ownerID === null || ownerID === undefined || ownerID === 0 || ownerID === -1) {
+              if (typeof game.hasFallout === "function" && game.hasFallout(n)) return;
               found = true;
             }
-          });
-          if (found) return true;
-        }
+          } catch (e) {}
+        });
+        if (found) return true;
       }
       return false;
     }
@@ -193,29 +241,27 @@
     function findInteriorTile(game, myPlayer) {
       const myID = getMySmallID(myPlayer);
       if (!myID) return null;
-      const bts = getBorderTilesSync(myPlayer);
+      const bts = getBorderTiles(game, myPlayer);
       if (bts.size === 0) return null;
-      if (typeof game.forEachNeighbor === "function") {
-        for (const bt of bts) {
-          let found = null;
-          game.forEachNeighbor(bt, (n) => {
-            if (found) return;
-            try {
-              if (typeof game.isLand === "function" && game.isLand(n) &&
-                  game.ownerID(n) === myID && !bts.has(n)) {
-                found = n;
-              }
-            } catch (e) {}
-          });
-          if (found) return found;
-        }
+      for (const bt of bts) {
+        let found = null;
+        forEachNeighbor(game, bt, (n) => {
+          if (found) return;
+          try {
+            if (typeof game.isLand === "function" && game.isLand(n) &&
+                game.ownerID(n) === myID && !bts.has(n)) {
+              found = n;
+            }
+          } catch (e) {}
+        });
+        if (found) return found;
       }
       const arr = Array.from(bts);
       return arr[Math.floor(arr.length / 2)] || null;
     }
 
     function findOwnedShoreTile(game, myPlayer) {
-      const bts = getBorderTilesSync(myPlayer);
+      const bts = getBorderTiles(game, myPlayer);
       for (const t of bts) {
         if (typeof game.isShore === "function" && game.isShore(t)) return t;
       }
@@ -223,7 +269,7 @@
     }
 
     function findTargetShoreTile(game, target) {
-      const bts = getBorderTilesSync(target);
+      const bts = getBorderTiles(game, target);
       for (const t of bts) {
         if (typeof game.isShore === "function" && game.isShore(t)) return t;
       }
@@ -243,16 +289,10 @@
       return null;
     }
 
-    function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent) {
+    function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio) {
       const tgt_is_bot = isBot(target) && !isBot(myPlayer);
-      const tgt_has_structs = isBot(target) &&
-        playerUnits(target).some(u => {
-          const t = unitType(u);
-          return t === "Missile Silo" || t === "SAM Launcher" || t === "City" || t === "Defense Post";
-        });
-
       const useExpandRatio = !target.isPlayer || !target.isPlayer() || tgt_is_bot;
-      const ratio = useExpandRatio ? (botCfg.expandRatio ?? 0.15) : (botCfg.reserveRatio ?? 0.35);
+      const ratio = useExpandRatio ? (botCfg.expandRatio ?? 0.15) : (reserveRatio ?? botCfg.reserveRatio ?? 0.35);
       const reserve = maxTroops * ratio;
 
       let troops;
@@ -264,8 +304,8 @@
       return Math.floor(Math.max(0, troops));
     }
 
-    function sendLandAttack(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent) {
-      const troops = calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent);
+    function sendLandAttack(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio) {
+      const troops = calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio);
       if (troops < 1) return false;
       const id = typeof target.id === "function" ? target.id() : (target.id || null);
       return sendPacket({ type: "attack", targetID: id ? String(id) : null, troops });
@@ -276,9 +316,9 @@
       timer: null,
       spawnSent: false,
       lastSpawnTile: null,
+      justSpawned: false,
       lastNukeAttemptTime: 0,
       lastStructureAttemptTime: 0,
-      targetDetail: "None",
       botAttackTroopsSent: 0,
       stats: {
         attacksSent: 0,
@@ -301,7 +341,6 @@
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
         botCfg.enabled = false;
         saveBotCfg();
-        this.targetDetail = "None";
         updateUI();
       },
 
@@ -321,7 +360,6 @@
         if (!this.running) return;
         const state = api.getGameState();
         if (!state || !state.game) {
-          this.targetDetail = "None";
           updateUI();
           return;
         }
@@ -329,9 +367,10 @@
         const game = state.game;
         const inSpawn = typeof game.inSpawnPhase === "function" && game.inSpawnPhase();
 
-        if (!inSpawn) {
+        if (!inSpawn && this.spawnSent) {
           this.spawnSent = false;
           this.lastSpawnTile = null;
+          this.justSpawned = true;
         }
 
         if (inSpawn) {
@@ -344,9 +383,16 @@
 
         const myPlayer = state.myPlayer;
         if (!myPlayer || !isAlive(myPlayer)) {
-          this.targetDetail = "None";
           updateUI();
           return;
+        }
+
+        if (this.justSpawned) {
+          this.justSpawned = false;
+          const initialTroops = Math.floor(playerTroops(myPlayer) / 2);
+          if (initialTroops >= 1) {
+            sendPacket({ type: "attack", targetID: null, troops: initialTroops });
+          }
         }
 
         this.botAttackTroopsSent = 0;
@@ -361,15 +407,13 @@
 
       handleAutoSpawn(game) {
         const tile = this.pickSpawnTile(game);
-        if (tile == null) { this.targetDetail = "Spawn phase…"; return; }
-
+        if (tile == null) return;
         if (this.spawnSent && tile === this.lastSpawnTile) return;
 
         const ok = sendPacket({ type: "spawn", tile });
         if (ok) {
           this.spawnSent = true;
           this.lastSpawnTile = tile;
-          this.targetDetail = `Spawning…`;
         }
       },
 
@@ -404,15 +448,12 @@
         const maxTroops = getMaxTroops(game, myPlayer);
         const triggerRatio = botCfg.triggerRatio ?? 0.55;
         const reserveRatio = botCfg.reserveRatio ?? 0.35;
+        const expandRatio = botCfg.expandRatio ?? 0.15;
         const troopRatio = myTroops / maxTroops;
-
-        const hasReserve = troopRatio >= reserveRatio;
-        const hasTrigger = troopRatio >= triggerRatio;
 
         const borderingMap = getBorderingPlayerIDs(game, myPlayer);
         const borderingPlayers = Array.from(borderingMap.values()).filter(p => isAlive(p));
         const borderingEnemies = borderingPlayers.filter(p => !isFriendly(myPlayer, p));
-
         borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
 
         const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
@@ -426,10 +467,9 @@
             if (tr > bestTr) { bestTr = tr; bestAtk = attacker; }
           }
           if (bestAtk) {
-            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent);
+            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              this.targetDetail = `⚔ Retaliating: ${getPlayerName(bestAtk)}`;
               return;
             }
           }
@@ -437,32 +477,40 @@
 
         const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
         if (borderingBotsWithStructs.length > 0) {
-          if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops)) return;
+          if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
         }
 
-        if (!hasReserve) {
-          this.targetDetail = `Building: ${Math.round(troopRatio * 100)}%/${Math.round(reserveRatio * 100)}%`;
-          return;
+        if (hasBorderWithTerraNullius(game, myPlayer)) {
+          const expandReserve = maxTroops * expandRatio;
+          if (myTroops > expandReserve) {
+            const troopsToSend = Math.floor(myTroops - expandReserve);
+            if (troopsToSend >= 1) {
+              const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
+              if (ok) {
+                this.stats.attacksSent++;
+                this.stats.troopsSentTotal += troopsToSend;
+                return;
+              }
+            }
+          }
         }
 
-        const borderingBots = borderingEnemies.filter(p => isBot(p));
-        if (borderingBots.length > 0) {
-          if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops)) return;
+        if (troopRatio >= reserveRatio) {
+          const borderingBots = borderingEnemies.filter(p => isBot(p));
+          if (borderingBots.length > 0) {
+            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
+          }
         }
 
-        if (!hasTrigger) {
-          this.targetDetail = `Waiting: ${Math.round(troopRatio * 100)}%/${Math.round(triggerRatio * 100)}%`;
-          return;
-        }
+        if (troopRatio < reserveRatio) return;
 
         for (const enemy of borderingEnemies) {
           const enemyMax = getMaxTroops(game, enemy);
           const enemyTroops = playerTroops(enemy);
           if (enemyTroops < enemyMax * 0.15 && enemyTroops < myTroops * 1.2) {
-            const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent);
+            const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              this.targetDetail = `⚔ Weak: ${getPlayerName(enemy)}`;
               return;
             }
           }
@@ -475,31 +523,22 @@
             return s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0));
           }, 0);
           if (totalIncoming > enemyTroops * 0.5) {
-            const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent);
+            const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              this.targetDetail = `⚔ Victim: ${getPlayerName(enemy)}`;
               return;
             }
           }
         }
 
-        if (hasBorderWithTerraNullius(game, myPlayer)) {
-          const ok = sendLandAttack(game, myPlayer, { id: () => null, isPlayer: () => false }, myTroops, maxTroops, this.botAttackTroopsSent);
-          if (ok) {
-            this.stats.attacksSent++;
-            this.targetDetail = "↔ Expanding";
-            return;
-          }
-        }
+        if (troopRatio < triggerRatio) return;
 
         if (borderingEnemies.length > 0) {
           const weakest = borderingEnemies[0];
           if (playerTroops(weakest) < myTroops) {
-            const ok = sendLandAttack(game, myPlayer, weakest, myTroops, maxTroops, this.botAttackTroopsSent);
+            const ok = sendLandAttack(game, myPlayer, weakest, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              this.targetDetail = `⚔ ${getPlayerName(weakest)}`;
               return;
             }
           }
@@ -518,20 +557,16 @@
                 const ok = sendPacket({ type: "boat", dst: destTile, troops: boatTroops });
                 if (ok) {
                   this.stats.attacksSent++;
-                  this.targetDetail = `⛵ ${getPlayerName(target)}`;
                   return;
                 }
               }
             }
           }
         }
-
-        this.targetDetail = "Ready";
       },
 
-      attackBots(bots, game, myPlayer, myTroops, maxTroops) {
+      attackBots(bots, game, myPlayer, myTroops, maxTroops, expandRatio) {
         let attacked = 0;
-
         bots.sort((a, b) => {
           const aStr = playerOwnsStructures(a);
           const bStr = playerOwnsStructures(b);
@@ -543,7 +578,7 @@
 
         for (const bot of bots) {
           const botId = typeof bot.id === "function" ? bot.id() : bot.id;
-          const troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent);
+          const troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent, expandRatio);
           if (troops < 1) continue;
           const ok = sendPacket({ type: "attack", targetID: String(botId), troops });
           if (ok) {
@@ -553,11 +588,7 @@
             this.stats.troopsSentTotal += troops;
           }
         }
-        if (attacked > 0) {
-          this.targetDetail = `⚔ ${attacked} Bot${attacked > 1 ? "s" : ""}`;
-          return true;
-        }
-        return false;
+        return attacked > 0;
       },
 
       handleStructures(game, myPlayer) {
@@ -647,7 +678,6 @@
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
-            this.targetDetail = `💣 ${bombType} → ${getPlayerName(target)}`;
           }
         }
       },
@@ -662,7 +692,7 @@
             if (aId) sendPacket({ type: "embargo", targetID: String(aId), action: "start" });
           }
         }
-      },
+      }
     };
 
     function renderTab(panel) {
@@ -678,11 +708,7 @@
         </button>
 
         <div style="background:#0d0d0d;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span style="color:#888;font-size:10px;">Current Target:</span>
-                <span id="blon-ext-auto-target-text" style="color:#ffcc00;font-weight:600;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">None</span>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;font-size:10px;background:#141414;padding:6px;border-radius:4px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 8px;font-size:10px;background:#141414;padding:6px;border-radius:4px;">
                 <div style="color:#888;">Attacks: <span id="blon-ext-auto-stat-attacks" style="color:#fff;font-weight:700;">0</span></div>
                 <div style="color:#888;">Structures: <span id="blon-ext-auto-stat-structs" style="color:#ffcc00;font-weight:700;">0</span></div>
                 <div style="color:#888;">Nukes: <span id="blon-ext-auto-stat-nukes" style="color:#ff6666;font-weight:700;">0</span></div>
@@ -693,7 +719,7 @@
         <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Attack (Priority Pipeline)</span>
+                <span>Auto-Attack & Wilderness Expansion</span>
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-build" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
@@ -728,6 +754,13 @@
                     <span id="blon-ext-reserve-value" style="color:#00ff66;font-weight:700;">${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}%</span>
                 </div>
                 <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}" style="width:100%;">
+            </div>
+            <div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
+                    <span>Wilderness Expand Floor:</span>
+                    <span id="blon-ext-expand-value" style="color:#00ff66;font-weight:700;">${Math.round((botCfg.expandRatio ?? 0.15) * 100)}%</span>
+                </div>
+                <input id="blon-ext-expand-slider" type="range" min="5" max="40" step="1" value="${Math.round((botCfg.expandRatio ?? 0.15) * 100)}" style="width:100%;">
             </div>
             <div>
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
@@ -767,6 +800,13 @@
         if (!isNaN(v)) { botCfg.reserveRatio = v / 100; if (rVal) rVal.textContent = `${v}%`; saveBotCfg(); }
       });
 
+      const eSl = panel.querySelector("#blon-ext-expand-slider");
+      const eVal = panel.querySelector("#blon-ext-expand-value");
+      if (eSl) eSl.addEventListener("input", (e) => {
+        const v = parseInt(e.target.value);
+        if (!isNaN(v)) { botCfg.expandRatio = v / 100; if (eVal) eVal.textContent = `${v}%`; saveBotCfg(); }
+      });
+
       const iSl = panel.querySelector("#blon-ext-interval-slider");
       const iVal = panel.querySelector("#blon-ext-interval-value");
       if (iSl) iSl.addEventListener("input", (e) => {
@@ -779,7 +819,6 @@
 
     function updateUI() {
       const masterBtn = document.getElementById("blon-ext-auto-master-toggle");
-      const targetEl = document.getElementById("blon-ext-auto-target-text");
       const isRunning = Engine.running;
       const themeColor = api.cfg?.guiColor || "#00ff66";
 
@@ -789,7 +828,6 @@
         masterBtn.style.color = isRunning ? "#ff6666" : "#000";
         masterBtn.style.borderColor = isRunning ? "#ff4444" : "transparent";
       }
-      if (targetEl) targetEl.textContent = Engine.targetDetail;
 
       const atkCnt = document.getElementById("blon-ext-auto-stat-attacks");
       const structCnt = document.getElementById("blon-ext-auto-stat-structs");
