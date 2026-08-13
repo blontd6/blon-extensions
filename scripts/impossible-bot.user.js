@@ -59,6 +59,8 @@
       if (stored) Object.assign(botCfg, JSON.parse(stored));
     } catch (e) {}
 
+    botCfg.autoEmoji = botCfg.autoEmoji === true;
+
     function saveBotCfg() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(botCfg)); } catch (e) {}
     }
@@ -445,7 +447,7 @@
         if (botCfg.autoEmbargo) this.handleAutoEmbargo(game, myPlayer);
         if (botCfg.autoDefend && botCfg.buildDefensePosts) this.handleDefensePost(game, myPlayer);
         if (botCfg.autoDonate) this.handleAutoDonate(game, myPlayer);
-        if (botCfg.autoEmoji) this.handleEmojis(game, myPlayer);
+        if (botCfg.autoEmoji === true) this.handleEmojis(game, myPlayer);
         if (botCfg.autoBuild) this.handleStructures(game, myPlayer);
         if (botCfg.autoNuke) this.handleNukes(game, myPlayer);
         if (botCfg.autoAttack || botCfg.autoExpand) this.handleAttacks(game, myPlayer);
@@ -518,7 +520,7 @@
             const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              if (botCfg.autoEmoji) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
+              if (botCfg.autoEmoji === true) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
               return;
             }
           }
@@ -565,7 +567,7 @@
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              if (botCfg.autoEmoji) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
+              if (botCfg.autoEmoji === true) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
             }
           }
@@ -581,7 +583,7 @@
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              if (botCfg.autoEmoji) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
+              if (botCfg.autoEmoji === true) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
             }
           }
@@ -595,7 +597,7 @@
             const ok = sendLandAttack(game, myPlayer, weakest, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
-              if (botCfg.autoEmoji) this.sendEmojiTo(weakest, EMOJI_IDX.ANGRY);
+              if (botCfg.autoEmoji === true) this.sendEmojiTo(weakest, EMOJI_IDX.ANGRY);
               return;
             }
           }
@@ -772,7 +774,7 @@
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
-            if (botCfg.autoEmoji) this.sendEmojiTo(target, EMOJI_IDX.RADIATION);
+            if (botCfg.autoEmoji === true) this.sendEmojiTo(target, EMOJI_IDX.RADIATION);
           }
         }
       },
@@ -814,11 +816,12 @@
         const donateAmount = Math.floor(myTr * 0.15);
         if (donateAmount > 500 && allyId) {
           sendPacket({ type: "donate_troops", recipient: String(allyId), troops: donateAmount });
-          if (botCfg.autoEmoji) this.sendEmojiTo(ally, EMOJI_IDX.HEART);
+          if (botCfg.autoEmoji === true) this.sendEmojiTo(ally, EMOJI_IDX.HEART);
         }
       },
 
       handleEmojis(game, myPlayer) {
+        if (botCfg.autoEmoji !== true) return;
         const now = Date.now();
         if (now - this.lastGlobalEmojiTime < 3000) return;
 
@@ -835,7 +838,7 @@
       },
 
       sendEmojiTo(target, emojiIndex) {
-        if (!botCfg.autoEmoji) return false;
+        if (botCfg.autoEmoji !== true) return false;
         const now = Date.now();
         const tId = typeof target === "string" ? target : (typeof target?.id === "function" ? target.id() : (target?.id || "AllPlayers"));
         const last = this.lastEmojiSentTime.get(String(tId)) || 0;
@@ -858,162 +861,146 @@
       const themeColor = api.cfg?.guiColor || "#00ff66";
 
       panel.innerHTML = `
-        <button id="blon-ext-auto-master-toggle" style="width:100%;padding:9px 0;background:${themeColor};border:none;color:#000;font-weight:700;font-size:11px;border-radius:5px;cursor:pointer;margin-bottom:10px;transition:all 0.2s ease;letter-spacing:0.5px;">
-            ENABLE AUTOPLAY (Shift+B)
+        <button id="blon-ext-auto-master-toggle" style="width:100%;padding:8px 0;background:${themeColor};border:none;color:#000;font-weight:700;font-size:11px;border-radius:4px;cursor:pointer;margin-bottom:10px;transition:all 0.2s ease;">
+            ENABLE AUTOPLAY
         </button>
 
-        <div style="background:#0d0d0d;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 8px;font-size:10px;background:#141414;padding:6px;border-radius:4px;">
-                <div style="color:#888;">Attacks: <span id="blon-ext-auto-stat-attacks" style="color:#fff;font-weight:700;">0</span></div>
-                <div style="color:#888;">Structures: <span id="blon-ext-auto-stat-structs" style="color:#ffcc00;font-weight:700;">0</span></div>
-                <div style="color:#888;">Nukes: <span id="blon-ext-auto-stat-nukes" style="color:#ff6666;font-weight:700;">0</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <div style="flex:1;background:#111;border:1px solid #222;border-radius:4px;padding:6px 8px;text-align:center;color:#888;font-size:10px;">
+                Attacks
+                <span id="blon-ext-auto-stat-attacks" style="color:#fff;font-weight:700;display:block;font-size:12px;margin-top:2px;">0</span>
+            </div>
+            <div style="flex:1;background:#111;border:1px solid #222;border-radius:4px;padding:6px 8px;text-align:center;color:#888;font-size:10px;">
+                Structures
+                <span id="blon-ext-auto-stat-structs" style="color:#ffcc00;font-weight:700;display:block;font-size:12px;margin-top:2px;">0</span>
+            </div>
+            <div style="flex:1;background:#111;border:1px solid #222;border-radius:4px;padding:6px 8px;text-align:center;color:#888;font-size:10px;">
+                Nukes
+                <span id="blon-ext-auto-stat-nukes" style="color:#ff6666;font-weight:700;display:block;font-size:12px;margin-top:2px;">0</span>
             </div>
         </div>
 
-        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">Combat & Expansion</div>
-        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Attack (Priority Pipeline)</span>
+        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-bottom:8px;">Combat & Expansion</div>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Attack
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-expand" ${botCfg.autoExpand !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Expand
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Defend
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Spawn
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-embargo" ${botCfg.autoEmbargo !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Embargo
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-donate" ${botCfg.autoDonate !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Donate
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Boat
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Emoji
+        </label>
+
+        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Structure & Building</div>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-build-master" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Build
+        </label>
+
+        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-cities" ${botCfg.buildCities !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Cities
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-expand" ${botCfg.autoExpand !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Expand (Wilderness / Neutral Land)</span>
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
+                <span style="font-size:10px;">Max Cities</span>
+                <input id="blon-ext-max-cities-slider" type="range" min="1" max="50" step="1" value="${botCfg.maxCities ?? 25}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-max-cities-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxCities ?? 25}</span>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> SAM Launchers
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Defend (Frontline Defense & Retaliation)</span>
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
+                <span style="font-size:10px;">Max SAMs</span>
+                <input id="blon-ext-max-sams-slider" type="range" min="0" max="20" step="1" value="${botCfg.maxSams ?? 5}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-max-sams-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSams ?? 5}</span>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-silos" ${botCfg.buildSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Missile Silos
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Spawn (Smart Land & Shore Positioning)</span>
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
+                <span style="font-size:10px;">Max Silos</span>
+                <input id="blon-ext-max-silos-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxSilos ?? 3}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-max-silos-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSilos ?? 3}</span>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-ports" ${botCfg.buildPorts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Ports
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-embargo" ${botCfg.autoEmbargo !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Embargo Hostile Nations</span>
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
+                <span style="font-size:10px;">Max Ports</span>
+                <input id="blon-ext-max-ports-slider" type="range" min="0" max="6" step="1" value="${botCfg.maxPorts ?? 2}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-max-ports-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxPorts ?? 2}</span>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-defposts" ${botCfg.buildDefensePosts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Defense Posts
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-donate" ${botCfg.autoDonate !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Donate (Troops to Allies in Combat)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Boat (Naval Island Invasions)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span style="color:#00ff66;">Auto-Emoji & Reactions (Disabled by Default)</span>
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
+                <span style="font-size:10px;">Max Posts</span>
+                <input id="blon-ext-max-defposts-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxDefensePosts ?? 3}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-max-defposts-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxDefensePosts ?? 3}</span>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-upgrade-silos" ${botCfg.upgradeSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Upgrade Silos
             </label>
         </div>
 
-        <div style="color:#ffcc00;font-size:10px;margin-bottom:6px;font-weight:700;">Structure & Building Controls</div>
-        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px;">
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#fff;font-size:11px;">
-                <input type="checkbox" id="blon-ext-build-master" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span style="font-weight:700;">Master Auto-Build Switch</span>
+        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Nuclear Strikes</div>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
+            <input type="checkbox" id="blon-ext-feat-nuke" ${botCfg.autoNuke !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Nuke
+        </label>
+        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-nuke-atom" ${botCfg.allowAtomBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Atom Bombs
             </label>
-
-            <div style="border-top:1px solid #222;padding-top:6px;display:flex;flex-direction:column;gap:6px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                        <input type="checkbox" id="blon-ext-build-cities" ${botCfg.buildCities !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                        <span>Cities</span>
-                    </label>
-                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-cities-val" style="color:#00ff66;font-weight:700;">${botCfg.maxCities ?? 25}</span></span>
-                </div>
-                <input id="blon-ext-max-cities-slider" type="range" min="1" max="50" step="1" value="${botCfg.maxCities ?? 25}" style="width:100%;">
-
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                        <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                        <span style="${botCfg.buildSams === false ? 'text-decoration:line-through;color:#777;' : ''}">SAM Launchers</span>
-                    </label>
-                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-sams-val" style="color:#00ff66;font-weight:700;">${botCfg.maxSams ?? 5}</span></span>
-                </div>
-                <input id="blon-ext-max-sams-slider" type="range" min="0" max="20" step="1" value="${botCfg.maxSams ?? 5}" style="width:100%;">
-
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                        <input type="checkbox" id="blon-ext-build-silos" ${botCfg.buildSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                        <span>Missile Silos</span>
-                    </label>
-                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-silos-val" style="color:#00ff66;font-weight:700;">${botCfg.maxSilos ?? 3}</span></span>
-                </div>
-                <input id="blon-ext-max-silos-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxSilos ?? 3}" style="width:100%;">
-
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                        <input type="checkbox" id="blon-ext-build-ports" ${botCfg.buildPorts !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                        <span>Ports / Docks</span>
-                    </label>
-                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-ports-val" style="color:#00ff66;font-weight:700;">${botCfg.maxPorts ?? 2}</span></span>
-                </div>
-                <input id="blon-ext-max-ports-slider" type="range" min="0" max="6" step="1" value="${botCfg.maxPorts ?? 2}" style="width:100%;">
-
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                        <input type="checkbox" id="blon-ext-build-defposts" ${botCfg.buildDefensePosts !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                        <span>Defense Posts</span>
-                    </label>
-                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-defposts-val" style="color:#00ff66;font-weight:700;">${botCfg.maxDefensePosts ?? 3}</span></span>
-                </div>
-                <input id="blon-ext-max-defposts-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxDefensePosts ?? 3}" style="width:100%;">
-
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:10px;margin-top:4px;">
-                    <input type="checkbox" id="blon-ext-upgrade-silos" ${botCfg.upgradeSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                    <span>Auto-Upgrade Silos to Lv3</span>
-                </label>
-            </div>
-
-            <div style="border-top:1px solid #222;padding-top:6px;display:flex;flex-direction:column;gap:5px;">
-                <div style="color:#aaa;font-size:10px;font-weight:600;">Nuclear Arsenal:</div>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                    <input type="checkbox" id="blon-ext-nuke-atom" ${botCfg.allowAtomBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                    <span>Atom Bombs (750k Gold)</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
-                    <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                    <span>Hydrogen Bombs (5M Gold)</span>
-                </label>
-            </div>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Hydrogen Bombs
+            </label>
         </div>
 
-        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">AI Tuning & Thresholds</div>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
-            <div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
-                    <span>Attack Trigger Ratio:</span>
-                    <span id="blon-ext-trigger-value" style="color:#00ff66;font-weight:700;">${Math.round((botCfg.triggerRatio ?? 0.55) * 100)}%</span>
-                </div>
-                <input id="blon-ext-trigger-slider" type="range" min="30" max="90" step="1" value="${Math.round((botCfg.triggerRatio ?? 0.55) * 100)}" style="width:100%;">
+        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">AI Tuning</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
+                <span style="min-width:130px;font-size:10px;">Attack Trigger Ratio</span>
+                <input id="blon-ext-trigger-slider" type="range" min="30" max="90" step="1" value="${Math.round((botCfg.triggerRatio ?? 0.55) * 100)}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-trigger-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.triggerRatio ?? 0.55) * 100)}%</span>
             </div>
-            <div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
-                    <span>Troop Reserve Floor:</span>
-                    <span id="blon-ext-reserve-value" style="color:#00ff66;font-weight:700;">${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}%</span>
-                </div>
-                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}" style="width:100%;">
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
+                <span style="min-width:130px;font-size:10px;">Troop Reserve Floor</span>
+                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-reserve-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.reserveRatio ?? 0.35) * 100)}%</span>
             </div>
-            <div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
-                    <span>Wilderness Expand Floor:</span>
-                    <span id="blon-ext-expand-value" style="color:#00ff66;font-weight:700;">${Math.round((botCfg.expandRatio ?? 0.15) * 100)}%</span>
-                </div>
-                <input id="blon-ext-expand-slider" type="range" min="5" max="40" step="1" value="${Math.round((botCfg.expandRatio ?? 0.15) * 100)}" style="width:100%;">
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
+                <span style="min-width:130px;font-size:10px;">Wilderness Expand Floor</span>
+                <input id="blon-ext-expand-slider" type="range" min="5" max="40" step="1" value="${Math.round((botCfg.expandRatio ?? 0.15) * 100)}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-expand-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.expandRatio ?? 0.15) * 100)}%</span>
             </div>
-            <div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
-                    <span>Bot Parallel Attack Cap:</span>
-                    <span id="blon-ext-parallel-value" style="color:#ffcc00;font-weight:700;">${botCfg.botParallelism ?? 50}</span>
-                </div>
-                <input id="blon-ext-parallel-slider" type="range" min="1" max="100" step="1" value="${botCfg.botParallelism ?? 50}" style="width:100%;">
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
+                <span style="min-width:130px;font-size:10px;">Bot Parallel Cap</span>
+                <input id="blon-ext-parallel-slider" type="range" min="1" max="100" step="1" value="${botCfg.botParallelism ?? 50}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-parallel-value" style="color:#ffcc00;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.botParallelism ?? 50}</span>
             </div>
-            <div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
-                    <span>AI Tick Interval:</span>
-                    <span id="blon-ext-interval-value" style="color:#00ff66;font-weight:700;">${botCfg.tickIntervalMs ?? 800}ms</span>
-                </div>
-                <input id="blon-ext-interval-slider" type="range" min="200" max="2500" step="50" value="${botCfg.tickIntervalMs ?? 800}" style="width:100%;">
+            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
+                <span style="min-width:130px;font-size:10px;">AI Tick Interval</span>
+                <input id="blon-ext-interval-slider" type="range" min="200" max="2500" step="50" value="${botCfg.tickIntervalMs ?? 800}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-interval-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.tickIntervalMs ?? 800}ms</span>
             </div>
         </div>
       `;
@@ -1037,6 +1024,7 @@
         ["blon-ext-build-ports", "buildPorts"],
         ["blon-ext-build-defposts", "buildDefensePosts"],
         ["blon-ext-upgrade-silos", "upgradeSilos"],
+        ["blon-ext-feat-nuke", "autoNuke"],
         ["blon-ext-nuke-atom", "allowAtomBombs"],
         ["blon-ext-nuke-hbomb", "allowHydrogenBombs"],
       ].forEach(([id, prop]) => {
@@ -1080,7 +1068,7 @@
       const themeColor = api.cfg?.guiColor || "#00ff66";
 
       if (masterBtn) {
-        masterBtn.textContent = isRunning ? "DISABLE AUTOPLAY" : "ENABLE AUTOPLAY (Shift+B)";
+        masterBtn.textContent = isRunning ? "DISABLE AUTOPLAY" : "ENABLE AUTOPLAY";
         masterBtn.style.background = isRunning ? "#331111" : themeColor;
         masterBtn.style.color = isRunning ? "#ff6666" : "#000";
         masterBtn.style.borderColor = isRunning ? "#ff4444" : "transparent";
