@@ -12,6 +12,7 @@
 
 
 
+
 (function() {
   "use strict";
 
@@ -34,7 +35,6 @@
         buildSilos: true,
         buildPorts: false,
         buildDefensePosts: true,
-        upgradeSilos: false, 
         allowAtomBombs: false, 
         allowHydrogenBombs: true, 
         triggerRatio: 0.50,
@@ -68,7 +68,6 @@
         buildSilos: true,
         buildPorts: true,
         buildDefensePosts: true,
-        upgradeSilos: true,
         allowAtomBombs: true,
         allowHydrogenBombs: true,
         triggerRatio: 0.55,
@@ -110,7 +109,6 @@
       buildSilos: true,
       buildPorts: false,
       buildDefensePosts: true,
-      upgradeSilos: false,
       allowAtomBombs: false,
       allowHydrogenBombs: true,
 
@@ -180,7 +178,6 @@
       setCb("blon-ext-build-silos", botCfg.buildSilos);
       setCb("blon-ext-build-ports", botCfg.buildPorts);
       setCb("blon-ext-build-defposts", botCfg.buildDefensePosts);
-      setCb("blon-ext-upgrade-silos", botCfg.upgradeSilos);
       setCb("blon-ext-feat-nuke", botCfg.autoNuke);
       setCb("blon-ext-nuke-atom", botCfg.allowAtomBombs);
       setCb("blon-ext-nuke-hbomb", botCfg.allowHydrogenBombs);
@@ -1488,20 +1485,6 @@
         const silos = countOf("Missile Silo");
         const ports = countOf("Port");
 
-        if (botCfg.upgradeSilos && botCfg.buildSilos) {
-          for (const u of units) {
-            if (unitType(u) !== "Missile Silo") continue;
-            const level = typeof u.level === "function" ? u.level() : 1;
-            const siloId = typeof u.id === "function" ? u.id() : u.id;
-            if (level < 3 && gold >= 2000000) {
-              if (sendPacket({ type: "upgrade_structure", unit: "Missile Silo", unitId: siloId })) {
-                this.stats.structuresBuilt++;
-                return;
-              }
-            }
-          }
-        }
-
         const interior = findInteriorTile(game, myPlayer);
 
         const maxPorts = botCfg.maxPorts ?? 2;
@@ -1724,10 +1707,6 @@
             </div>
 
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-upgrade-silos" ${botCfg.upgradeSilos === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Upgrade Silos (Level 3 Hydro)
-            </label>
-
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> SAM Launchers
             </label>
             <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">
@@ -1813,7 +1792,6 @@
         ["blon-ext-build-silos", "buildSilos"],
         ["blon-ext-build-ports", "buildPorts"],
         ["blon-ext-build-defposts", "buildDefensePosts"],
-        ["blon-ext-upgrade-silos", "upgradeSilos"],
         ["blon-ext-feat-nuke", "autoNuke"],
         ["blon-ext-nuke-atom", "allowAtomBombs"],
         ["blon-ext-nuke-hbomb", "allowHydrogenBombs"],
@@ -1823,7 +1801,6 @@
           botCfg[prop] = e.target.checked;
           botCfg.activePreset = "custom";
           saveBotCfg();
-          updatePresetUI();
         });
       });
 
@@ -1838,7 +1815,6 @@
               botCfg.activePreset = "custom";
               if (lb) lb.textContent = `${v}${suffix}`;
               saveBotCfg();
-              updatePresetUI();
             }
           });
         }
