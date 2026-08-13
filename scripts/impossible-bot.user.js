@@ -19,14 +19,20 @@
     const botCfg = {
       enabled: false,
       autoAttack: true,
+      autoExpand: true,
+      autoDefend: true,
       autoBuild: true,
       autoNuke: true,
       autoSpawn: true,
       autoEmbargo: true,
       autoDonate: true,
+      autoEmoji: false,
+      autoBoat: true,
+      autoWarship: true,
       triggerRatio: 0.55,
       reserveRatio: 0.35,
       expandRatio: 0.15,
+      botParallelism: 50,
       tickIntervalMs: 800,
       hotkey: "b"
     };
@@ -39,6 +45,19 @@
     function saveBotCfg() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(botCfg)); } catch (e) {}
     }
+
+    const EMOJI_IDX = {
+      GRIN: 0, SMILE: 1, LOVE: 2, ANGEL: 3, COOL: 4,
+      DISAPPOINTED: 5, PLEADING: 6, CRYING: 7, SHOCKED: 8, ANGRY: 9,
+      DEVIL: 10, CLOWN: 11, YAWN: 12, SALUTE: 13, MIDDLE_FINGER: 14,
+      WAVE: 15, CLAP: 16, HAND: 17, PRAY: 18, FLEX: 19,
+      THUMBS_UP: 20, THUMBS_DOWN: 21, PALM_UP: 22, PINCHED: 23, FACEPALM: 24,
+      HANDSHAKE: 25, SOS: 26, DOVE: 27, WHITE_FLAG: 28, HOURGLASS: 29,
+      FIRE: 30, BOOM: 31, SKULL: 32, RADIATION: 33, WARNING: 34,
+      CROWN: 38, FIRST: 39, HEART: 48, BROKEN_HEART: 49,
+      GOLD: 50, ANCHOR: 51, SAILBOAT: 52, HOUSE: 53, SHIELD: 54,
+      FACTORY: 55, TRAIN: 56, QUESTION: 57, CHICKEN: 58, RAT: 59
+    };
 
     function forEachNeighbor(game, tile, fn) {
       if (typeof game.forEachNeighbor === "function") {
@@ -319,12 +338,17 @@
       justSpawned: false,
       lastNukeAttemptTime: 0,
       lastStructureAttemptTime: 0,
+      lastEmojiSentTime: new Map(),
+      lastGlobalEmojiTime: 0,
+      lastDefensePostAttemptTime: 0,
+      lastDonateAttemptTime: 0,
       botAttackTroopsSent: 0,
       stats: {
         attacksSent: 0,
         troopsSentTotal: 0,
         structuresBuilt: 0,
-        nukesLaunched: 0
+        nukesLaunched: 0,
+        expandsDone: 0
       },
 
       start() {
@@ -349,7 +373,7 @@
       scheduleNextTick() {
         if (!this.running) return;
         if (this.timer) clearTimeout(this.timer);
-        const interval = Math.max(300, Math.min(3000, botCfg.tickIntervalMs || 800));
+        const interval = Math.max(200, Math.min(3000, botCfg.tickIntervalMs || 800));
         this.timer = setTimeout(() => {
           try { this.tick(); } catch (e) { console.warn("[ImpossibleBot] Tick error:", e); }
           if (this.running) this.scheduleNextTick();
@@ -389,18 +413,25 @@
 
         if (this.justSpawned) {
           this.justSpawned = false;
-          const initialTroops = Math.floor(playerTroops(myPlayer) / 2);
-          if (initialTroops >= 1) {
-            sendPacket({ type: "attack", targetID: null, troops: initialTroops });
+          if (botCfg.autoExpand) {
+            const initialTroops = Math.floor(playerTroops(myPlayer) / 2);
+            if (initialTroops >= 1) {
+              if (sendPacket({ type: "attack", targetID: null, troops: initialTroops })) {
+                this.stats.expandsDone++;
+              }
+            }
           }
         }
 
         this.botAttackTroopsSent = 0;
 
         if (botCfg.autoEmbargo) this.handleAutoEmbargo(game, myPlayer);
+        if (botCfg.autoDefend) this.handleDefensePost(game, myPlayer);
+        if (botCfg.autoDonate) this.handleAutoDonate(game, myPlayer);
+        if (botCfg.autoEmoji) this.handleEmojis(game, myPlayer);
         if (botCfg.autoBuild) this.handleStructures(game, myPlayer);
         if (botCfg.autoNuke) this.handleNukes(game, myPlayer);
-        if (botCfg.autoAttack) this.handleAttacks(game, myPlayer);
+        if (botCfg.autoAttack || botCfg.autoExpand) this.handleAttacks(game, myPlayer);
 
         updateUI();
       },
@@ -457,7 +488,7 @@
         borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
 
         const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
-        if (incoming.length > 0) {
+        if (incoming.length > 0 && botCfg.autoDefend) {
           let bestAtk = null, bestTr = 0;
           for (const atk of incoming) {
             if (!atk) continue;
@@ -470,17 +501,20 @@
             const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
+              if (botCfg.autoEmoji) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
               return;
             }
           }
         }
 
-        const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
-        if (borderingBotsWithStructs.length > 0) {
-          if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
+        if (botCfg.autoAttack) {
+          const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
+          if (borderingBotsWithStructs.length > 0) {
+            if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
+          }
         }
 
-        if (hasBorderWithTerraNullius(game, myPlayer)) {
+        if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
           const expandReserve = maxTroops * expandRatio;
           if (myTroops > expandReserve) {
             const troopsToSend = Math.floor(myTroops - expandReserve);
@@ -488,12 +522,15 @@
               const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
               if (ok) {
                 this.stats.attacksSent++;
+                this.stats.expandsDone++;
                 this.stats.troopsSentTotal += troopsToSend;
                 return;
               }
             }
           }
         }
+
+        if (!botCfg.autoAttack) return;
 
         if (troopRatio >= reserveRatio) {
           const borderingBots = borderingEnemies.filter(p => isBot(p));
@@ -511,6 +548,7 @@
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
+              if (botCfg.autoEmoji) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
             }
           }
@@ -526,6 +564,7 @@
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
+              if (botCfg.autoEmoji) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
             }
           }
@@ -539,12 +578,13 @@
             const ok = sendLandAttack(game, myPlayer, weakest, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
               this.stats.attacksSent++;
+              if (botCfg.autoEmoji) this.sendEmojiTo(weakest, EMOJI_IDX.ANGRY);
               return;
             }
           }
         }
 
-        if (borderingEnemies.length === 0) {
+        if (borderingEnemies.length === 0 && botCfg.autoBoat) {
           const allPlayers = getAllPlayers(game);
           const remotes = allPlayers.filter(p => !isFriendly(myPlayer, p) && isAlive(p));
           if (remotes.length > 0) {
@@ -567,6 +607,7 @@
 
       attackBots(bots, game, myPlayer, myTroops, maxTroops, expandRatio) {
         let attacked = 0;
+        const cap = Math.max(1, Math.min(100, botCfg.botParallelism || 50));
         bots.sort((a, b) => {
           const aStr = playerOwnsStructures(a);
           const bStr = playerOwnsStructures(b);
@@ -576,7 +617,7 @@
           return (playerTroops(a) / aTiles) - (playerTroops(b) / bTiles);
         });
 
-        for (const bot of bots) {
+        for (const bot of bots.slice(0, cap)) {
           const botId = typeof bot.id === "function" ? bot.id() : bot.id;
           const troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent, expandRatio);
           if (troops < 1) continue;
@@ -589,6 +630,34 @@
           }
         }
         return attacked > 0;
+      },
+
+      handleDefensePost(game, myPlayer) {
+        const now = Date.now();
+        if (now - this.lastDefensePostAttemptTime < 2500) return;
+        this.lastDefensePostAttemptTime = now;
+
+        const gold = playerGold(myPlayer);
+        if (gold < 250000) return;
+
+        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
+        if (incoming.length === 0) return;
+
+        const myTr = playerTroops(myPlayer);
+        if (myTr <= 0) return;
+        const totalInc = incoming.reduce((s, a) => s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0)), 0);
+        if (totalInc < myTr * 0.25) return;
+
+        const units = playerUnits(myPlayer);
+        const posts = units.filter(u => unitType(u) === "Defense Post");
+        if (posts.length >= 3) return;
+
+        const frontTile = findInteriorTile(game, myPlayer);
+        if (frontTile != null) {
+          if (sendPacket({ type: "build_unit", unit: "Defense Post", tile: frontTile })) {
+            this.stats.structuresBuilt++;
+          }
+        }
       },
 
       handleStructures(game, myPlayer) {
@@ -619,7 +688,7 @@
 
         const interior = findInteriorTile(game, myPlayer);
 
-        if (ports < 2 && gold >= 125000) {
+        if (ports < 2 && gold >= 125000 && botCfg.autoWarship) {
           const shore = findOwnedShoreTile(game, myPlayer);
           if (shore != null && sendPacket({ type: "build_unit", unit: "Port", tile: shore })) {
             this.stats.structuresBuilt++;
@@ -678,6 +747,7 @@
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
+            if (botCfg.autoEmoji) this.sendEmojiTo(target, EMOJI_IDX.RADIATION);
           }
         }
       },
@@ -692,6 +762,66 @@
             if (aId) sendPacket({ type: "embargo", targetID: String(aId), action: "start" });
           }
         }
+      },
+
+      handleAutoDonate(game, myPlayer) {
+        const now = Date.now();
+        if (now - this.lastDonateAttemptTime < 3000) return;
+        this.lastDonateAttemptTime = now;
+
+        const myTr = playerTroops(myPlayer);
+        if (myTr < 50000) return;
+
+        const all = getAllPlayers(game);
+        const alliesInCombat = all.filter(p => {
+          if (!isFriendly(myPlayer, p) || !isAlive(p)) return false;
+          const id1 = typeof myPlayer.id === "function" ? myPlayer.id() : myPlayer.id;
+          const id2 = typeof p.id === "function" ? p.id() : p.id;
+          if (id1 === id2) return false;
+          const inAtk = typeof p.incomingAttacks === "function" ? p.incomingAttacks() : [];
+          return inAtk.length > 0;
+        });
+
+        if (alliesInCombat.length === 0) return;
+        alliesInCombat.sort((a, b) => playerTroops(a) - playerTroops(b));
+        const ally = alliesInCombat[0];
+        const allyId = typeof ally.id === "function" ? ally.id() : ally.id;
+        const donateAmount = Math.floor(myTr * 0.15);
+        if (donateAmount > 500 && allyId) {
+          sendPacket({ type: "donate_troops", recipient: String(allyId), troops: donateAmount });
+          if (botCfg.autoEmoji) this.sendEmojiTo(ally, EMOJI_IDX.HEART);
+        }
+      },
+
+      handleEmojis(game, myPlayer) {
+        const now = Date.now();
+        if (now - this.lastGlobalEmojiTime < 3000) return;
+
+        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
+        if (incoming.length > 0) {
+          const totalInc = incoming.reduce((s, a) => s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0)), 0);
+          const myTr = playerTroops(myPlayer);
+          if (totalInc >= myTr * 2.5) {
+            this.sendEmojiTo("AllPlayers", EMOJI_IDX.SKULL);
+            this.lastGlobalEmojiTime = now;
+            return;
+          }
+        }
+      },
+
+      sendEmojiTo(target, emojiIndex) {
+        if (!botCfg.autoEmoji) return false;
+        const now = Date.now();
+        const tId = typeof target === "string" ? target : (typeof target?.id === "function" ? target.id() : (target?.id || "AllPlayers"));
+        const last = this.lastEmojiSentTime.get(String(tId)) || 0;
+        if (now - last < 4000) return false;
+        this.lastEmojiSentTime.set(String(tId), now);
+
+        return sendPacket({
+          type: "emoji",
+          recipient: String(tId),
+          emoji: Number.isInteger(emojiIndex) ? emojiIndex : EMOJI_IDX.HEART
+        });
       }
     };
 
@@ -719,7 +849,15 @@
         <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Attack & Wilderness Expansion</span>
+                <span>Auto-Attack (Priority Pipeline)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-feat-expand" ${botCfg.autoExpand !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span>Auto-Expand (Wilderness / Neutral Land)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span>Auto-Defend (Frontline Posts & Retaliation)</span>
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-build" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
@@ -727,19 +865,31 @@
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-nuke" ${botCfg.autoNuke !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Nuke (Atom / Hydrogen Bomb)</span>
+                <span>Auto-Nuke (Tactical Atom & Hydrogen Bombs)</span>
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Spawn (Smart Positioning)</span>
+                <span>Auto-Spawn (Smart Land & Shore Positioning)</span>
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-embargo" ${botCfg.autoEmbargo !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
                 <span>Auto-Embargo Hostile Nations</span>
             </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-feat-donate" ${botCfg.autoDonate !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span>Auto-Donate (Troops to Allies in Combat)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span>Auto-Boat (Naval Island Invasions)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
+                <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span style="color:#00ff66;">Auto-Emoji & Reactions (Disabled by Default)</span>
+            </label>
         </div>
 
-        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">AI Tuning</div>
+        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">AI Tuning & Thresholds</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
             <div>
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
@@ -764,10 +914,17 @@
             </div>
             <div>
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
+                    <span>Bot Parallel Attack Cap:</span>
+                    <span id="blon-ext-parallel-value" style="color:#ffcc00;font-weight:700;">${botCfg.botParallelism ?? 50}</span>
+                </div>
+                <input id="blon-ext-parallel-slider" type="range" min="1" max="100" step="1" value="${botCfg.botParallelism ?? 50}" style="width:100%;">
+            </div>
+            <div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:2px;">
                     <span>AI Tick Interval:</span>
                     <span id="blon-ext-interval-value" style="color:#00ff66;font-weight:700;">${botCfg.tickIntervalMs ?? 800}ms</span>
                 </div>
-                <input id="blon-ext-interval-slider" type="range" min="300" max="3000" step="50" value="${botCfg.tickIntervalMs ?? 800}" style="width:100%;">
+                <input id="blon-ext-interval-slider" type="range" min="200" max="2500" step="50" value="${botCfg.tickIntervalMs ?? 800}" style="width:100%;">
             </div>
         </div>
       `;
@@ -777,10 +934,15 @@
 
       [
         ["blon-ext-feat-attack", "autoAttack"],
+        ["blon-ext-feat-expand", "autoExpand"],
+        ["blon-ext-feat-defend", "autoDefend"],
         ["blon-ext-feat-build", "autoBuild"],
         ["blon-ext-feat-nuke", "autoNuke"],
         ["blon-ext-feat-spawn", "autoSpawn"],
         ["blon-ext-feat-embargo", "autoEmbargo"],
+        ["blon-ext-feat-donate", "autoDonate"],
+        ["blon-ext-feat-boat", "autoBoat"],
+        ["blon-ext-feat-emoji", "autoEmoji"],
       ].forEach(([id, prop]) => {
         const cb = panel.querySelector("#" + id);
         if (cb) cb.addEventListener("change", (e) => { botCfg[prop] = e.target.checked; saveBotCfg(); });
@@ -805,6 +967,13 @@
       if (eSl) eSl.addEventListener("input", (e) => {
         const v = parseInt(e.target.value);
         if (!isNaN(v)) { botCfg.expandRatio = v / 100; if (eVal) eVal.textContent = `${v}%`; saveBotCfg(); }
+      });
+
+      const pSl = panel.querySelector("#blon-ext-parallel-slider");
+      const pVal = panel.querySelector("#blon-ext-parallel-value");
+      if (pSl) pSl.addEventListener("input", (e) => {
+        const v = parseInt(e.target.value);
+        if (!isNaN(v)) { botCfg.botParallelism = v; if (pVal) pVal.textContent = String(v); saveBotCfg(); }
       });
 
       const iSl = panel.querySelector("#blon-ext-interval-slider");
