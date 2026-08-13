@@ -327,18 +327,42 @@
       return null;
     }
 
+    function getEffectiveReserveRatio(game, myPlayer, baseReserveRatio) {
+      let r = baseReserveRatio ?? botCfg.reserveRatio ?? 0.35;
+      try {
+        const totalLand = (typeof game.numLandTiles === "function" ? game.numLandTiles() : null) || 5000;
+        const owned = typeof myPlayer.numTilesOwned === "function" ? Number(myPlayer.numTilesOwned()) : 10;
+        const share = owned / Math.max(1, totalLand);
+        r = Math.max(r, Math.min(0.60, share * 1.5));
+      } catch (e) {}
+      return r;
+    }
+
     function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio) {
+      const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
+      const reserve = maxTroops * effReserve;
+      const available = Math.max(0, myTroops - reserve - (botAttackTroopsSent || 0));
+      if (available <= 0) return 0;
+
+      const targetTr = playerTroops(target);
       const tgt_is_bot = isBot(target) && !isBot(myPlayer);
-      const useExpandRatio = !target.isPlayer || !target.isPlayer() || tgt_is_bot;
-      const ratio = useExpandRatio ? (botCfg.expandRatio ?? 0.15) : (reserveRatio ?? botCfg.reserveRatio ?? 0.35);
-      const reserve = maxTroops * ratio;
 
       let troops;
       if (tgt_is_bot) {
-        troops = Math.min(myTroops - reserve - botAttackTroopsSent, Math.max(playerTroops(target) * 1.5, 1));
+        let needed = targetTr * 3;
+        if (needed > available) {
+          if (available < targetTr * 1.5) needed = 0;
+          else needed = available;
+        }
+        troops = Math.min(available, needed > 0 ? needed : available);
       } else {
-        troops = myTroops - reserve;
+        const needed = Math.max(targetTr * 1.5, Math.floor(maxTroops * 0.05));
+        troops = Math.min(available, needed);
       }
+
+      const maxSendCap = Math.max(1000, Math.floor(myTroops * 0.35));
+      troops = Math.min(troops, maxSendCap);
+
       return Math.floor(Math.max(0, troops));
     }
 
@@ -363,6 +387,7 @@
       lastDefensePostAttemptTime: 0,
       lastDonateAttemptTime: 0,
       lastExpandMs: 0,
+      lastAttackMs: 0,
       botAttackTroopsSent: 0,
       stats: {
         attacksSent: 0,
@@ -434,7 +459,7 @@
         if (!this.behaviorsInitialized) {
           this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
-            const burstTroops = Math.floor(playerTroops(myPlayer) / 2);
+            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.40);
             if (burstTroops >= 1) {
               if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
@@ -508,6 +533,7 @@
         const triggerRatio = botCfg.triggerRatio ?? 0.55;
         const reserveRatio = botCfg.reserveRatio ?? 0.35;
         const expandRatio = botCfg.expandRatio ?? 0.15;
+        const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
         const troopRatio = myTroops / maxTroops;
 
         const borderingMap = getBorderingPlayerIDs(game, myPlayer);
@@ -528,6 +554,7 @@
           if (bestAtk) {
             const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
+              this.lastAttackMs = Date.now();
               this.stats.attacksSent++;
               if (botCfg.autoEmoji === true) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
               return;
@@ -538,7 +565,7 @@
         if (botCfg.autoAttack) {
           const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
           if (borderingBotsWithStructs.length > 0) {
-            if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
+            if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, reserveRatio)) return;
           }
         }
 
@@ -547,15 +574,18 @@
           const now = Date.now();
           if (now - this.lastExpandMs >= expandThrottle) {
             const expandReserve = maxTroops * expandRatio;
-            const troopsToSend = Math.floor(myTroops - expandReserve);
-            if (troopsToSend >= Math.max(1, maxTroops * 0.03)) {
-              const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
-              if (ok) {
-                this.lastExpandMs = now;
-                this.stats.attacksSent++;
-                this.stats.expandsDone++;
-                this.stats.troopsSentTotal += troopsToSend;
-                return;
+            const available = myTroops - expandReserve;
+            if (available > 0) {
+              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * 0.20)));
+              if (troopsToSend >= Math.max(1, maxTroops * 0.02)) {
+                const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
+                if (ok) {
+                  this.lastExpandMs = now;
+                  this.stats.attacksSent++;
+                  this.stats.expandsDone++;
+                  this.stats.troopsSentTotal += troopsToSend;
+                  return;
+                }
               }
             }
           }
@@ -563,14 +593,17 @@
 
         if (!botCfg.autoAttack) return;
 
-        if (troopRatio >= reserveRatio) {
+        if (troopRatio >= effReserve) {
           const borderingBots = borderingEnemies.filter(p => isBot(p));
           if (borderingBots.length > 0) {
-            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, expandRatio)) return;
+            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, reserveRatio)) return;
           }
         }
 
-        if (troopRatio < reserveRatio) return;
+        if (troopRatio < effReserve) return;
+
+        const now = Date.now();
+        if (now - this.lastAttackMs < 1200) return;
 
         for (const enemy of borderingEnemies) {
           const enemyMax = getMaxTroops(game, enemy);
@@ -578,6 +611,7 @@
           if (enemyTroops < enemyMax * 0.15 && enemyTroops < myTroops * 1.2) {
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
+              this.lastAttackMs = now;
               this.stats.attacksSent++;
               if (botCfg.autoEmoji === true) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
@@ -594,6 +628,7 @@
           if (totalIncoming > enemyTroops * 0.5) {
             const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
+              this.lastAttackMs = now;
               this.stats.attacksSent++;
               if (botCfg.autoEmoji === true) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
               return;
@@ -608,6 +643,7 @@
           if (playerTroops(weakest) < myTroops) {
             const ok = sendLandAttack(game, myPlayer, weakest, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
             if (ok) {
+              this.lastAttackMs = now;
               this.stats.attacksSent++;
               if (botCfg.autoEmoji === true) this.sendEmojiTo(weakest, EMOJI_IDX.ANGRY);
               return;
@@ -627,6 +663,7 @@
               if (boatTroops > 1000) {
                 const ok = sendPacket({ type: "boat", dst: destTile, troops: boatTroops });
                 if (ok) {
+                  this.lastAttackMs = now;
                   this.stats.attacksSent++;
                   return;
                 }
@@ -636,7 +673,7 @@
         }
       },
 
-      attackBots(bots, game, myPlayer, myTroops, maxTroops, expandRatio) {
+      attackBots(bots, game, myPlayer, myTroops, maxTroops, reserveRatio) {
         let attacked = 0;
         const cap = Math.max(1, Math.min(100, botCfg.botParallelism || 50));
         bots.sort((a, b) => {
@@ -648,9 +685,16 @@
           return (playerTroops(a) / aTiles) - (playerTroops(b) / bTiles);
         });
 
+        const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
+        const reserve = maxTroops * effReserve;
+        const maxBotBudget = Math.max(0, Math.min(myTroops - reserve, Math.floor(myTroops * 0.35)));
+
         for (const bot of bots.slice(0, cap)) {
+          if (this.botAttackTroopsSent >= maxBotBudget) break;
           const botId = typeof bot.id === "function" ? bot.id() : bot.id;
-          const troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent, expandRatio);
+          const availableBudget = maxBotBudget - this.botAttackTroopsSent;
+          let troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
+          troops = Math.min(troops, availableBudget);
           if (troops < 1) continue;
           const ok = sendPacket({ type: "attack", targetID: String(botId), troops });
           if (ok) {
@@ -659,6 +703,9 @@
             this.stats.attacksSent++;
             this.stats.troopsSentTotal += troops;
           }
+        }
+        if (attacked > 0) {
+          this.lastAttackMs = Date.now();
         }
         return attacked > 0;
       },
