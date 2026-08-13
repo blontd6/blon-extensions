@@ -6,5 +6,13 @@
     "author": "blontd6",
     "version": "1.0",
     "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/blon-debug.user.js"
+  },
+  {
+    "id": "impossible-bot",
+    "name": "Impossible Bot (Autoplay)",
+    "description": "Autoplay extension mirroring OpenFront Impossible Solo AI",
+    "author": "blon",
+    "version": "2.0.0",
+    "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/impossible-bot.user.js"
   }
 ]
