@@ -1,13 +1,5 @@
 [
   {
-    "id": "blon-debug",
-    "name": "Blon Debug",
-    "description": "debug",
-    "author": "blontd6",
-    "version": "1.0",
-    "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/blon-debug.user.js"
-  },
-  {
     "id": "impossible-bot",
     "name": "Impossible Bot (Autoplay)",
     "description": "Autoplay extension featuring OpenFront 1v1 Sweaty Meta and Solo Impossible AI",
