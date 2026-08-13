@@ -149,6 +149,77 @@
       }
     }
 
+    function syncAllUIControls() {
+      const themeColor = api.cfg?.guiColor || "#00ff66";
+      const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
+      const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
+
+      const modeSelect = document.getElementById("blon-ext-mode-select");
+      if (modeSelect) modeSelect.value = is1v1 ? "v1v1" : "solo";
+
+      const modeBadge = document.getElementById("blon-ext-mode-badge");
+      if (modeBadge) {
+        modeBadge.textContent = is1v1 ? "1v1 Sweaty Meta" : (isSolo ? "Solo Impossible AI" : "Custom");
+        modeBadge.style.color = is1v1 ? "#00ff66" : "#38bdf8";
+      }
+
+      const btnV1 = document.getElementById("blon-preset-v1v1");
+      if (btnV1) {
+        btnV1.style.background = is1v1 ? themeColor : "#1a1a1a";
+        btnV1.style.borderColor = is1v1 ? themeColor : "#333";
+        btnV1.style.color = is1v1 ? "#000" : "#aaa";
+      }
+
+      const btnSolo = document.getElementById("blon-preset-solo");
+      if (btnSolo) {
+        btnSolo.style.background = isSolo ? themeColor : "#1a1a1a";
+        btnSolo.style.borderColor = isSolo ? themeColor : "#333";
+        btnSolo.style.color = isSolo ? "#000" : "#aaa";
+      }
+
+      const setCb = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = Boolean(val);
+      };
+
+      const setSlider = (sliderId, labelId, val, suffix = "") => {
+        const sl = document.getElementById(sliderId);
+        const lb = document.getElementById(labelId);
+        if (sl) sl.value = val;
+        if (lb) lb.textContent = `${val}${suffix}`;
+      };
+
+      setCb("blon-ext-feat-attack", botCfg.autoAttack);
+      setCb("blon-ext-feat-expand", botCfg.autoExpand);
+      setCb("blon-ext-feat-defend", botCfg.autoDefend);
+      setCb("blon-ext-feat-spawn", botCfg.autoSpawn);
+      setCb("blon-ext-feat-embargo", botCfg.autoEmbargo);
+      setCb("blon-ext-feat-boat", botCfg.autoBoat);
+      setCb("blon-ext-feat-emoji", botCfg.autoEmoji);
+      setCb("blon-ext-build-master", botCfg.autoBuild);
+      setCb("blon-ext-build-cities", botCfg.buildCities);
+      setCb("blon-ext-build-sams", botCfg.buildSams);
+      setCb("blon-ext-build-silos", botCfg.buildSilos);
+      setCb("blon-ext-build-ports", botCfg.buildPorts);
+      setCb("blon-ext-build-defposts", botCfg.buildDefensePosts);
+      setCb("blon-ext-upgrade-silos", botCfg.upgradeSilos);
+      setCb("blon-ext-feat-nuke", botCfg.autoNuke);
+      setCb("blon-ext-nuke-atom", botCfg.allowAtomBombs);
+      setCb("blon-ext-nuke-hbomb", botCfg.allowHydrogenBombs);
+
+      setSlider("blon-ext-max-cities-slider", "blon-ext-max-cities-val", botCfg.maxCities ?? 3);
+      setSlider("blon-ext-max-defposts-slider", "blon-ext-max-defposts-val", botCfg.maxDefensePosts ?? 4);
+      setSlider("blon-ext-max-silos-slider", "blon-ext-max-silos-val", botCfg.maxSilos ?? 1);
+      setSlider("blon-ext-max-sams-slider", "blon-ext-max-sams-val", botCfg.maxSams ?? 0);
+      setSlider("blon-ext-max-ports-slider", "blon-ext-max-ports-val", botCfg.maxPorts ?? 0);
+
+      setSlider("blon-ext-trigger-slider", "blon-ext-trigger-value", Math.round((botCfg.triggerRatio ?? 0.50) * 100), "%");
+      setSlider("blon-ext-reserve-slider", "blon-ext-reserve-value", Math.round((botCfg.reserveRatio ?? 0.30) * 100), "%");
+      setSlider("blon-ext-expand-slider", "blon-ext-expand-value", Math.round((botCfg.expandRatio ?? 0.10) * 100), "%");
+      setSlider("blon-ext-parallel-slider", "blon-ext-parallel-value", botCfg.botParallelism ?? 60);
+      setSlider("blon-ext-interval-slider", "blon-ext-interval-value", botCfg.tickIntervalMs ?? 650, "ms");
+    }
+
     function applyPreset(presetKey) {
       const p = PRESETS[presetKey];
       if (!p) return;
@@ -156,7 +227,7 @@
       botCfg.mode = p.mode;
       Object.assign(botCfg, p);
       saveBotCfg();
-      updatePresetUI();
+      syncAllUIControls();
     }
 
     const EMOJI_IDX = {
@@ -1611,7 +1682,13 @@
         </button>
 
         <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-            <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:700;">STRATEGY PRESET</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="color:#aaa;font-size:10px;font-weight:700;">STRATEGY PRESET</span>
+                <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:2px 4px;cursor:pointer;">
+                    <option value="v1v1" ${botCfg.activePreset === 'v1v1' || botCfg.mode === '1v1' ? 'selected' : ''}>1v1 Sweaty Meta</option>
+                    <option value="solo" ${botCfg.activePreset === 'solo' || botCfg.mode === 'solo' ? 'selected' : ''}>Solo Impossible AI</option>
+                </select>
+            </div>
             <div style="display:flex;gap:6px;">
                 <button id="blon-preset-v1v1" style="flex:1;padding:6px 0;background:${botCfg.activePreset === 'v1v1' ? themeColor : '#1a1a1a'};border:1px solid ${botCfg.activePreset === 'v1v1' ? themeColor : '#333'};color:${botCfg.activePreset === 'v1v1' ? '#000' : '#aaa'};font-weight:700;font-size:10px;border-radius:4px;cursor:pointer;transition:all 0.15s;">
                     1v1 Sweaty Meta
@@ -1628,6 +1705,7 @@
                 <span id="blon-ext-auto-target-text" style="color:#ffcc00;font-weight:700;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">None</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;font-size:10px;background:#141414;padding:6px;border-radius:4px;">
+                <div style="color:#888;">Mode: <span id="blon-ext-mode-badge" style="color:#00ff66;font-weight:700;">1v1 Sweaty Meta</span></div>
                 <div style="color:#888;">Opponent: <span id="blon-ext-opp-name" style="color:#fff;font-weight:700;">None</span></div>
                 <div style="color:#888;">Cap: <span id="blon-ext-cap-ratio" style="color:#00ff66;font-weight:700;">100%</span></div>
                 <div style="color:#888;">Attacks: <span id="blon-ext-auto-stat-attacks" style="color:#fff;font-weight:700;">0</span></div>
@@ -1762,17 +1840,26 @@
       const masterBtn = panel.querySelector("#blon-ext-auto-master-toggle");
       if (masterBtn) masterBtn.addEventListener("click", () => Engine.toggle());
 
+      const modeSelect = panel.querySelector("#blon-ext-mode-select");
+      if (modeSelect) {
+        modeSelect.addEventListener("change", (e) => {
+          applyPreset(e.target.value);
+        });
+      }
+
       const btnV1 = panel.querySelector("#blon-preset-v1v1");
-      if (btnV1) btnV1.addEventListener("click", () => {
-        applyPreset("v1v1");
-        renderTab(panel);
-      });
+      if (btnV1) {
+        btnV1.addEventListener("click", () => {
+          applyPreset("v1v1");
+        });
+      }
 
       const btnSolo = panel.querySelector("#blon-preset-solo");
-      if (btnSolo) btnSolo.addEventListener("click", () => {
-        applyPreset("solo");
-        renderTab(panel);
-      });
+      if (btnSolo) {
+        btnSolo.addEventListener("click", () => {
+          applyPreset("solo");
+        });
+      }
 
       [
         ["blon-ext-feat-attack", "autoAttack"],
@@ -1869,6 +1956,14 @@
       const tgtEl = document.getElementById("blon-ext-auto-target-text");
       const oppEl = document.getElementById("blon-ext-opp-name");
       const capEl = document.getElementById("blon-ext-cap-ratio");
+      const modeBadge = document.getElementById("blon-ext-mode-badge");
+
+      if (modeBadge) {
+        const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
+        const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
+        modeBadge.textContent = is1v1 ? "1v1 Sweaty Meta" : (isSolo ? "Solo Impossible AI" : "Custom");
+        modeBadge.style.color = is1v1 ? "#00ff66" : "#38bdf8";
+      }
 
       if (tgtEl) tgtEl.textContent = Engine.targetDetail || "None";
       if (oppEl) oppEl.textContent = Engine.opponentName || "None";
