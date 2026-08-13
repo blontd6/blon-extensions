@@ -29,6 +29,23 @@
       autoEmoji: false,
       autoBoat: true,
       autoWarship: true,
+
+      buildCities: true,
+      buildSams: true,
+      buildSilos: true,
+      buildPorts: true,
+      buildDefensePosts: true,
+      upgradeSilos: true,
+      allowAtomBombs: true,
+      allowHydrogenBombs: true,
+
+      maxCities: 25,
+      maxSams: 5,
+      samRatio: 0.35,
+      maxSilos: 3,
+      maxPorts: 2,
+      maxDefensePosts: 3,
+
       triggerRatio: 0.55,
       reserveRatio: 0.35,
       expandRatio: 0.15,
@@ -426,7 +443,7 @@
         this.botAttackTroopsSent = 0;
 
         if (botCfg.autoEmbargo) this.handleAutoEmbargo(game, myPlayer);
-        if (botCfg.autoDefend) this.handleDefensePost(game, myPlayer);
+        if (botCfg.autoDefend && botCfg.buildDefensePosts) this.handleDefensePost(game, myPlayer);
         if (botCfg.autoDonate) this.handleAutoDonate(game, myPlayer);
         if (botCfg.autoEmoji) this.handleEmojis(game, myPlayer);
         if (botCfg.autoBuild) this.handleStructures(game, myPlayer);
@@ -650,7 +667,8 @@
 
         const units = playerUnits(myPlayer);
         const posts = units.filter(u => unitType(u) === "Defense Post");
-        if (posts.length >= 3) return;
+        const maxPosts = botCfg.maxDefensePosts ?? 3;
+        if (posts.length >= maxPosts) return;
 
         const frontTile = findInteriorTile(game, myPlayer);
         if (frontTile != null) {
@@ -674,21 +692,24 @@
         const silos = countOf("Missile Silo");
         const ports = countOf("Port");
 
-        for (const u of units) {
-          if (unitType(u) !== "Missile Silo") continue;
-          const level = typeof u.level === "function" ? u.level() : 1;
-          const siloId = typeof u.id === "function" ? u.id() : u.id;
-          if (level < 3 && gold >= 2000000) {
-            if (sendPacket({ type: "upgrade_structure", unit: "Missile Silo", unitId: siloId })) {
-              this.stats.structuresBuilt++;
-              return;
+        if (botCfg.upgradeSilos && botCfg.buildSilos) {
+          for (const u of units) {
+            if (unitType(u) !== "Missile Silo") continue;
+            const level = typeof u.level === "function" ? u.level() : 1;
+            const siloId = typeof u.id === "function" ? u.id() : u.id;
+            if (level < 3 && gold >= 2000000) {
+              if (sendPacket({ type: "upgrade_structure", unit: "Missile Silo", unitId: siloId })) {
+                this.stats.structuresBuilt++;
+                return;
+              }
             }
           }
         }
 
         const interior = findInteriorTile(game, myPlayer);
 
-        if (ports < 2 && gold >= 125000 && botCfg.autoWarship) {
+        const maxPorts = botCfg.maxPorts ?? 2;
+        if (botCfg.buildPorts && ports < maxPorts && gold >= 125000 && botCfg.autoWarship) {
           const shore = findOwnedShoreTile(game, myPlayer);
           if (shore != null && sendPacket({ type: "build_unit", unit: "Port", tile: shore })) {
             this.stats.structuresBuilt++;
@@ -696,23 +717,27 @@
           }
         }
 
-        const wantSams = Math.floor(cities * 0.35);
-        if (sams < wantSams && gold >= 1500000 && interior != null) {
+        const maxSams = botCfg.maxSams ?? 5;
+        const samRatio = botCfg.samRatio ?? 0.35;
+        const wantSams = Math.min(maxSams, Math.floor(cities * samRatio));
+        if (botCfg.buildSams && sams < wantSams && gold >= 1500000 && interior != null) {
           if (sendPacket({ type: "build_unit", unit: "SAM Launcher", tile: interior })) {
             this.stats.structuresBuilt++;
             return;
           }
         }
 
-        const wantSilos = Math.min(3, Math.floor(cities / 3));
-        if (silos < wantSilos && gold >= 1000000 && interior != null) {
+        const maxSilos = botCfg.maxSilos ?? 3;
+        const wantSilos = Math.min(maxSilos, Math.floor(cities / 3));
+        if (botCfg.buildSilos && silos < wantSilos && gold >= 1000000 && interior != null) {
           if (sendPacket({ type: "build_unit", unit: "Missile Silo", tile: interior })) {
             this.stats.structuresBuilt++;
             return;
           }
         }
 
-        if (gold >= 125000 && interior != null) {
+        const maxCities = botCfg.maxCities ?? 25;
+        if (botCfg.buildCities && cities < maxCities && gold >= 125000 && interior != null) {
           if (sendPacket({ type: "build_unit", unit: "City", tile: interior })) {
             this.stats.structuresBuilt++;
             return;
@@ -738,8 +763,8 @@
         const target = humanTargets[0];
 
         let bombType = null;
-        if (gold >= 5000000) bombType = "Hydrogen Bomb";
-        else if (gold >= 750000) bombType = "Atom Bomb";
+        if (botCfg.allowHydrogenBombs && gold >= 5000000) bombType = "Hydrogen Bomb";
+        else if (botCfg.allowAtomBombs && gold >= 750000) bombType = "Atom Bomb";
         if (!bombType) return;
 
         const targetTile = findTargetCityTile(target) || findTargetShoreTile(game, target);
@@ -845,7 +870,7 @@
             </div>
         </div>
 
-        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">Autoplay Capabilities</div>
+        <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">Combat & Expansion</div>
         <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
@@ -857,15 +882,7 @@
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Defend (Frontline Posts & Retaliation)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-build" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Build (Cities, SAMs, Silos, Ports)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-nuke" ${botCfg.autoNuke !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
-                <span>Auto-Nuke (Tactical Atom & Hydrogen Bombs)</span>
+                <span>Auto-Defend (Frontline Defense & Retaliation)</span>
             </label>
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
@@ -887,6 +904,78 @@
                 <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;">
                 <span style="color:#00ff66;">Auto-Emoji & Reactions (Disabled by Default)</span>
             </label>
+        </div>
+
+        <div style="color:#ffcc00;font-size:10px;margin-bottom:6px;font-weight:700;">Structure & Building Controls</div>
+        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px;">
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:#fff;font-size:11px;">
+                <input type="checkbox" id="blon-ext-build-master" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                <span style="font-weight:700;">Master Auto-Build Switch</span>
+            </label>
+
+            <div style="border-top:1px solid #222;padding-top:6px;display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                        <input type="checkbox" id="blon-ext-build-cities" ${botCfg.buildCities !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                        <span>Cities</span>
+                    </label>
+                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-cities-val" style="color:#00ff66;font-weight:700;">${botCfg.maxCities ?? 25}</span></span>
+                </div>
+                <input id="blon-ext-max-cities-slider" type="range" min="1" max="50" step="1" value="${botCfg.maxCities ?? 25}" style="width:100%;">
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                        <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                        <span style="${botCfg.buildSams === false ? 'text-decoration:line-through;color:#777;' : ''}">SAM Launchers</span>
+                    </label>
+                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-sams-val" style="color:#00ff66;font-weight:700;">${botCfg.maxSams ?? 5}</span></span>
+                </div>
+                <input id="blon-ext-max-sams-slider" type="range" min="0" max="20" step="1" value="${botCfg.maxSams ?? 5}" style="width:100%;">
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                        <input type="checkbox" id="blon-ext-build-silos" ${botCfg.buildSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                        <span>Missile Silos</span>
+                    </label>
+                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-silos-val" style="color:#00ff66;font-weight:700;">${botCfg.maxSilos ?? 3}</span></span>
+                </div>
+                <input id="blon-ext-max-silos-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxSilos ?? 3}" style="width:100%;">
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                        <input type="checkbox" id="blon-ext-build-ports" ${botCfg.buildPorts !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                        <span>Ports / Docks</span>
+                    </label>
+                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-ports-val" style="color:#00ff66;font-weight:700;">${botCfg.maxPorts ?? 2}</span></span>
+                </div>
+                <input id="blon-ext-max-ports-slider" type="range" min="0" max="6" step="1" value="${botCfg.maxPorts ?? 2}" style="width:100%;">
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                        <input type="checkbox" id="blon-ext-build-defposts" ${botCfg.buildDefensePosts !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                        <span>Defense Posts</span>
+                    </label>
+                    <span style="color:#888;font-size:10px;">Max: <span id="blon-ext-max-defposts-val" style="color:#00ff66;font-weight:700;">${botCfg.maxDefensePosts ?? 3}</span></span>
+                </div>
+                <input id="blon-ext-max-defposts-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxDefensePosts ?? 3}" style="width:100%;">
+
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:10px;margin-top:4px;">
+                    <input type="checkbox" id="blon-ext-upgrade-silos" ${botCfg.upgradeSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                    <span>Auto-Upgrade Silos to Lv3</span>
+                </label>
+            </div>
+
+            <div style="border-top:1px solid #222;padding-top:6px;display:flex;flex-direction:column;gap:5px;">
+                <div style="color:#aaa;font-size:10px;font-weight:600;">Nuclear Arsenal:</div>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                    <input type="checkbox" id="blon-ext-nuke-atom" ${botCfg.allowAtomBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                    <span>Atom Bombs (750k Gold)</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#ccc;font-size:11px;">
+                    <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;">
+                    <span>Hydrogen Bombs (5M Gold)</span>
+                </label>
+            </div>
         </div>
 
         <div style="color:#aaa;font-size:10px;margin-bottom:6px;font-weight:600;">AI Tuning & Thresholds</div>
@@ -936,52 +1025,51 @@
         ["blon-ext-feat-attack", "autoAttack"],
         ["blon-ext-feat-expand", "autoExpand"],
         ["blon-ext-feat-defend", "autoDefend"],
-        ["blon-ext-feat-build", "autoBuild"],
-        ["blon-ext-feat-nuke", "autoNuke"],
         ["blon-ext-feat-spawn", "autoSpawn"],
         ["blon-ext-feat-embargo", "autoEmbargo"],
         ["blon-ext-feat-donate", "autoDonate"],
         ["blon-ext-feat-boat", "autoBoat"],
         ["blon-ext-feat-emoji", "autoEmoji"],
+        ["blon-ext-build-master", "autoBuild"],
+        ["blon-ext-build-cities", "buildCities"],
+        ["blon-ext-build-sams", "buildSams"],
+        ["blon-ext-build-silos", "buildSilos"],
+        ["blon-ext-build-ports", "buildPorts"],
+        ["blon-ext-build-defposts", "buildDefensePosts"],
+        ["blon-ext-upgrade-silos", "upgradeSilos"],
+        ["blon-ext-nuke-atom", "allowAtomBombs"],
+        ["blon-ext-nuke-hbomb", "allowHydrogenBombs"],
       ].forEach(([id, prop]) => {
         const cb = panel.querySelector("#" + id);
         if (cb) cb.addEventListener("change", (e) => { botCfg[prop] = e.target.checked; saveBotCfg(); });
       });
 
-      const tSl = panel.querySelector("#blon-ext-trigger-slider");
-      const tVal = panel.querySelector("#blon-ext-trigger-value");
-      if (tSl) tSl.addEventListener("input", (e) => {
-        const v = parseInt(e.target.value);
-        if (!isNaN(v)) { botCfg.triggerRatio = v / 100; if (tVal) tVal.textContent = `${v}%`; saveBotCfg(); }
-      });
+      const bindSlider = (sliderId, labelId, prop, isPct = false, suffix = "") => {
+        const sl = panel.querySelector("#" + sliderId);
+        const lb = panel.querySelector("#" + labelId);
+        if (sl) {
+          sl.addEventListener("input", (e) => {
+            const v = parseInt(e.target.value);
+            if (!isNaN(v)) {
+              botCfg[prop] = isPct ? v / 100 : v;
+              if (lb) lb.textContent = `${v}${suffix}`;
+              saveBotCfg();
+            }
+          });
+        }
+      };
 
-      const rSl = panel.querySelector("#blon-ext-reserve-slider");
-      const rVal = panel.querySelector("#blon-ext-reserve-value");
-      if (rSl) rSl.addEventListener("input", (e) => {
-        const v = parseInt(e.target.value);
-        if (!isNaN(v)) { botCfg.reserveRatio = v / 100; if (rVal) rVal.textContent = `${v}%`; saveBotCfg(); }
-      });
+      bindSlider("blon-ext-max-cities-slider", "blon-ext-max-cities-val", "maxCities");
+      bindSlider("blon-ext-max-sams-slider", "blon-ext-max-sams-val", "maxSams");
+      bindSlider("blon-ext-max-silos-slider", "blon-ext-max-silos-val", "maxSilos");
+      bindSlider("blon-ext-max-ports-slider", "blon-ext-max-ports-val", "maxPorts");
+      bindSlider("blon-ext-max-defposts-slider", "blon-ext-max-defposts-val", "maxDefensePosts");
 
-      const eSl = panel.querySelector("#blon-ext-expand-slider");
-      const eVal = panel.querySelector("#blon-ext-expand-value");
-      if (eSl) eSl.addEventListener("input", (e) => {
-        const v = parseInt(e.target.value);
-        if (!isNaN(v)) { botCfg.expandRatio = v / 100; if (eVal) eVal.textContent = `${v}%`; saveBotCfg(); }
-      });
-
-      const pSl = panel.querySelector("#blon-ext-parallel-slider");
-      const pVal = panel.querySelector("#blon-ext-parallel-value");
-      if (pSl) pSl.addEventListener("input", (e) => {
-        const v = parseInt(e.target.value);
-        if (!isNaN(v)) { botCfg.botParallelism = v; if (pVal) pVal.textContent = String(v); saveBotCfg(); }
-      });
-
-      const iSl = panel.querySelector("#blon-ext-interval-slider");
-      const iVal = panel.querySelector("#blon-ext-interval-value");
-      if (iSl) iSl.addEventListener("input", (e) => {
-        const v = parseInt(e.target.value);
-        if (!isNaN(v)) { botCfg.tickIntervalMs = v; if (iVal) iVal.textContent = `${v}ms`; saveBotCfg(); }
-      });
+      bindSlider("blon-ext-trigger-slider", "blon-ext-trigger-value", "triggerRatio", true, "%");
+      bindSlider("blon-ext-reserve-slider", "blon-ext-reserve-value", "reserveRatio", true, "%");
+      bindSlider("blon-ext-expand-slider", "blon-ext-expand-value", "expandRatio", true, "%");
+      bindSlider("blon-ext-parallel-slider", "blon-ext-parallel-value", "botParallelism");
+      bindSlider("blon-ext-interval-slider", "blon-ext-interval-value", "tickIntervalMs", false, "ms");
 
       updateUI();
     }
