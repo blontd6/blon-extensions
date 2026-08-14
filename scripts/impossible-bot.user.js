@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Impossible Bot (Autoplay)
 // @namespace    http://tampermonkey.net/
-// @version      3.0.0
+// @version      3.1.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -37,8 +37,8 @@
         buildDefensePosts: true,
         allowAtomBombs: false, 
         allowHydrogenBombs: true, 
-        triggerRatio: 0.35,
-        reserveRatio: 0.15,
+        triggerRatio: 0.46,
+        reserveRatio: 0.42,
         expandRatio: 0.05,
         botParallelism: 80,
         autoAttack: true,
@@ -51,7 +51,7 @@
         autoDonate: false,
         autoBoat: true,
         autoWarship: true,
-        tickIntervalMs: 400
+        tickIntervalMs: 350
       },
       solo: {
         id: "solo",
@@ -644,8 +644,8 @@
         const myTr = playerTroops(myPlayer);
         if (oppTr < myTr * 0.25) return 0.10;
       }
-      if (phase === "mid") return 0.22;
-      return 0.28;
+      if (phase === "mid") return 0.40;
+      return 0.42;
     }
 
     function find1v1CityTile(game, myPlayer, existingCities = [], opponent = null, cityIndex = 0) {
@@ -843,19 +843,22 @@
     }
 
     function getEffectiveReserveRatio(game, myPlayer, baseReserveRatio) {
+      if (botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1") {
+        return baseReserveRatio ?? botCfg.reserveRatio ?? 0.42;
+      }
       let r = baseReserveRatio ?? botCfg.reserveRatio ?? 0.25;
       try {
         const totalLand = (typeof game.numLandTiles === "function" ? game.numLandTiles() : null) || 5000;
         const owned = typeof myPlayer.numTilesOwned === "function" ? Number(myPlayer.numTilesOwned()) : 10;
         const share = owned / Math.max(1, totalLand);
-        r = Math.max(r, Math.min(0.55, share * 1.3));
+        r = Math.max(r, Math.min(0.45, share * 1.0));
       } catch (e) {}
       return r;
     }
 
     function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio, isKillShot) {
       if (isKillShot) {
-        const reserve = maxTroops * 0.12;
+        const reserve = maxTroops * 0.10;
         return Math.floor(Math.max(0, myTroops - reserve - (botAttackTroopsSent || 0)));
       }
       const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
@@ -866,17 +869,14 @@
       const tgt_is_bot = isBot(target) && !isBot(myPlayer);
       let troops;
       if (tgt_is_bot) {
-        let needed = targetTr * 2.5;
-        if (needed > available) {
-          if (available < targetTr * 1.3) needed = 0;
-          else needed = available;
-        }
-        troops = Math.min(available, needed > 0 ? needed : available);
+        const targetTiles = typeof target.numTilesOwned === "function" ? Number(target.numTilesOwned()) || 1 : 1;
+        const needed = Math.ceil(targetTr * 1.25 + targetTiles * 1.2 + 50);
+        troops = Math.min(available, needed);
       } else {
-        const needed = Math.max(targetTr * 1.8, Math.floor(maxTroops * 0.08));
+        const needed = Math.max(Math.ceil(targetTr * 1.35), Math.floor(maxTroops * 0.08));
         troops = Math.min(available, needed);
       }
-      const maxSendCap = Math.max(2000, Math.floor(myTroops * 0.55));
+      const maxSendCap = Math.max(2000, Math.floor(myTroops * 0.60));
       troops = Math.min(troops, maxSendCap);
       return Math.floor(Math.max(0, troops));
     }
@@ -907,6 +907,10 @@
       lastBoatFlankTime: 0,
       lastBoatDefenseTime: 0,
       lastCutAttackTime: 0,
+      activeProbeBoat: null,
+      lastProbeBoatTime: 0,
+      justLandedBeachhead: false,
+      lastLandingAssaultTime: 0,
       botAttackTroopsSent: 0,
       targetDetail: "None",
       opponentName: "None",
@@ -937,6 +941,8 @@
         botCfg.enabled = false;
         saveBotCfg();
         this.targetDetail = "None";
+        this.activeProbeBoat = null;
+        this.justLandedBeachhead = false;
         updateUI();
       },
 
@@ -1322,6 +1328,8 @@
         const dynamicReserve = getDynamicReserve(game, myPlayer, opponent, phase);
         const troopRatio = myTroops / maxTroops;
         const now = Date.now();
+        const myID = getMySmallID(myPlayer);
+        const myBts = getBorderTiles(game, myPlayer);
 
         const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
         if (incoming.length > 0 && botCfg.autoDefend) {
@@ -1355,6 +1363,32 @@
           return id1 === id2;
         });
 
+        const myUnits = playerUnits(myPlayer);
+        const myBoats = myUnits.filter(u => {
+          const t = unitType(u);
+          return t === "Transport" || t === "Boat" || t === "TransportShip";
+        });
+        const hasBoatInFlight = myBoats.length > 0;
+
+        if (this.activeProbeBoat) {
+          const probe = this.activeProbeBoat;
+          const targetTile = probe.targetTile;
+          const isTargetTileOurs = (typeof game.ownerID === "function" && game.ownerID(targetTile) === myID) || myBts.has(targetTile);
+          let neighborOurs = false;
+          forEachNeighbor(game, targetTile, (n) => {
+            if (myBts.has(n) || (typeof game.ownerID === "function" && game.ownerID(n) === myID)) neighborOurs = true;
+          });
+          const timeInFlight = now - probe.sentTime;
+
+          if (isTargetTileOurs || neighborOurs || isOpponentBordering || (!hasBoatInFlight && timeInFlight > 1500)) {
+            this.activeProbeBoat = null;
+            this.justLandedBeachhead = true;
+            this.lastLandingAssaultTime = now;
+          } else if (timeInFlight > 120000) {
+            this.activeProbeBoat = null;
+          }
+        }
+
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
           const expandInterval = phase === "early" ? 400 : 900;
           if (now - this.lastExpandMs >= expandInterval) {
@@ -1378,13 +1412,7 @@
           }
         }
 
-        if (botCfg.autoAttack && borderingBots.length > 0 && troopRatio >= dynamicReserve) {
-          borderingBots.sort((a, b) => {
-            const aTr = playerTroops(a);
-            const bTr = playerTroops(b);
-            return aTr - bTr;
-          });
-
+        if (botCfg.autoAttack && borderingBots.length > 0 && troopRatio >= (phase === "early" ? 0.10 : dynamicReserve)) {
           if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, dynamicReserve)) {
             this.targetDetail = "Annex Bots";
             return;
@@ -1396,8 +1424,41 @@
         const oppTroops = playerTroops(opponent);
         const oppUnits = playerUnits(opponent);
         const oppHasDP = oppUnits.some(u => unitType(u) === "Defense Post");
+        const isKillShot = oppTroops < myTroops * 0.28 || oppTroops < maxTroops * 0.08;
+        const isPunish = OppTracker.isPunishWindow;
 
-        if (now - this.lastCutAttackTime > 3000 && troopRatio >= 0.30) {
+        if (this.justLandedBeachhead || (now - this.lastLandingAssaultTime < 2500)) {
+          if (isOpponentBordering && (now - this.lastAttackMs >= 300)) {
+            const ok = sendLandAttack(game, myPlayer, opponent, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, true);
+            if (ok) {
+              this.lastAttackMs = now;
+              this.justLandedBeachhead = false;
+              this.stats.attacksSent++;
+              this.targetDetail = `BEACHHEAD ASSAULT -> ${this.opponentName}`;
+              if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.SWORD);
+              return;
+            }
+          } else if (botCfg.autoBoat && (now - this.lastBoatFlankTime > 1000)) {
+            const destTile = findTargetCityTile(opponent) || findTargetShoreTile(game, opponent);
+            if (destTile != null) {
+              const followUpTroops = Math.floor(Math.min(myTroops * 0.35, Math.max(0, myTroops - maxTroops * dynamicReserve)));
+              if (followUpTroops > 500) {
+                const ok = sendPacket({ type: "boat", dst: destTile, troops: followUpTroops });
+                if (ok) {
+                  this.lastBoatFlankTime = now;
+                  this.justLandedBeachhead = false;
+                  this.stats.attacksSent++;
+                  this.stats.boatsSent++;
+                  this.stats.troopsSentTotal += followUpTroops;
+                  this.targetDetail = `Point-Blank Naval Strike #${destTile}`;
+                  return;
+                }
+              }
+            }
+          }
+        }
+
+        if (now - this.lastCutAttackTime > 3000 && troopRatio >= dynamicReserve) {
           const cutTile = findCutTarget(game, opponent);
           if (cutTile != null) {
             const cutTroops = Math.floor(Math.min(myTroops * 0.30, maxTroops * 0.25));
@@ -1415,32 +1476,9 @@
           }
         }
 
-        if (botCfg.autoBoat && (now - this.lastBoatFlankTime > 3500) && troopRatio >= 0.30) {
-          const shouldSendBoat = oppHasDP || !isOpponentBordering || phase === "late";
-          if (shouldSendBoat) {
-            const flankTile = find1v1FlankShoreTile(game, myPlayer, opponent);
-            if (flankTile != null) {
-              const boatTroops = Math.min(Math.floor(myTroops * 0.28), 350000);
-              if (boatTroops > 500) {
-                const ok = sendPacket({ type: "boat", dst: flankTile, troops: boatTroops });
-                if (ok) {
-                  this.lastBoatFlankTime = now;
-                  this.stats.attacksSent++;
-                  this.stats.boatsSent++;
-                  this.stats.troopsSentTotal += boatTroops;
-                  this.targetDetail = `Rear Flank Boat #${flankTile}`;
-                  return;
-                }
-              }
-            }
-          }
-        }
-
-        if (isOpponentBordering && (now - this.lastAttackMs >= 600)) {
-          const isKillShot = oppTroops < myTroops * 0.28;
-          const isPunish = OppTracker.isPunishWindow;
-          const hasAdvantage = myTroops > oppTroops * 1.15 && troopRatio >= (botCfg.triggerRatio ?? 0.35);
-          const latePhasePush = phase === "late" && myTroops > oppTroops * 0.95 && troopRatio >= 0.40;
+        if (isOpponentBordering && (now - this.lastAttackMs >= 500)) {
+          const hasAdvantage = myTroops > oppTroops * 1.10 && troopRatio >= (botCfg.triggerRatio ?? 0.46);
+          const latePhasePush = phase === "late" && myTroops > oppTroops * 0.95 && troopRatio >= 0.44;
 
           if (isKillShot || isPunish || hasAdvantage || latePhasePush) {
             const ok = sendLandAttack(game, myPlayer, opponent, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, isKillShot);
@@ -1462,19 +1500,25 @@
           }
         }
 
-        if (botCfg.autoBoat && !isOpponentBordering && (now - this.lastBoatFlankTime > 3000) && troopRatio >= 0.28) {
-          this.lastBoatFlankTime = now;
-          const destTile = findTargetCityTile(opponent) || findTargetShoreTile(game, opponent);
-          if (destTile != null) {
-            const boatTroops = Math.min(Math.floor(myTroops * 0.25), 300000);
-            if (boatTroops > 500) {
-              const ok = sendPacket({ type: "boat", dst: destTile, troops: boatTroops });
-              if (ok) {
-                this.stats.attacksSent++;
-                this.stats.boatsSent++;
-                this.stats.troopsSentTotal += boatTroops;
-                this.targetDetail = `Naval Invasion #${destTile}`;
-                return;
+        if (botCfg.autoBoat && !this.activeProbeBoat && !hasBoatInFlight && (now - this.lastProbeBoatTime > 4000) && troopRatio >= 0.20) {
+          const shouldProbe = !isOpponentBordering || oppHasDP || phase === "late";
+          if (shouldProbe) {
+            const flankTile = (!isOpponentBordering ? (findTargetCityTile(opponent) || findTargetShoreTile(game, opponent)) : find1v1FlankShoreTile(game, myPlayer, opponent)) || findTargetShoreTile(game, opponent);
+            if (flankTile != null) {
+              const probeTroops = Math.max(50, Math.min(Math.floor(myTroops * 0.01), 25000));
+              if (probeTroops >= 1) {
+                const ok = sendPacket({ type: "boat", dst: flankTile, troops: probeTroops });
+                if (ok) {
+                  const oppId = typeof opponent.id === "function" ? opponent.id() : opponent.id;
+                  this.activeProbeBoat = { targetTile: flankTile, targetID: oppId, sentTime: now, troops: probeTroops };
+                  this.lastProbeBoatTime = now;
+                  this.lastBoatFlankTime = now;
+                  this.stats.attacksSent++;
+                  this.stats.boatsSent++;
+                  this.stats.troopsSentTotal += probeTroops;
+                  this.targetDetail = `1% Probe Boat #${flankTile}`;
+                  return;
+                }
               }
             }
           }
@@ -1639,26 +1683,39 @@
           if (aStr !== bStr) return aStr ? -1 : 1;
           const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
           const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
-          return (playerTroops(a) / aTiles) - (playerTroops(b) / bTiles);
+          const aTr = playerTroops(a);
+          const bTr = playerTroops(b);
+          return (aTr / aTiles) - (bTr / bTiles);
         });
 
         const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
         const reserve = maxTroops * effReserve;
-        const maxBotBudget = Math.max(0, Math.min(myTroops - reserve, Math.floor(myTroops * 0.35)));
+        let availableBudget = Math.max(0, myTroops - reserve - this.botAttackTroopsSent);
+        if (availableBudget < 10) return false;
 
         for (const bot of bots.slice(0, cap)) {
-          if (this.botAttackTroopsSent >= maxBotBudget) break;
+          if (availableBudget <= 0) break;
           const botId = typeof bot.id === "function" ? bot.id() : bot.id;
-          const availableBudget = maxBotBudget - this.botAttackTroopsSent;
-          let troops = calcLandAttackTroops(game, myPlayer, bot, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
-          troops = Math.min(troops, availableBudget);
-          if (troops < 1) continue;
-          const ok = sendPacket({ type: "attack", targetID: String(botId), troops });
-          if (ok) {
-            attacked++;
-            this.botAttackTroopsSent += troops;
-            this.stats.attacksSent++;
-            this.stats.troopsSentTotal += troops;
+          const botTr = playerTroops(bot);
+          const botTiles = typeof bot.numTilesOwned === "function" ? Number(bot.numTilesOwned()) || 1 : 1;
+          const needed = Math.ceil(botTr * 1.25 + botTiles * 1.2 + 50);
+
+          let sendAmt = 0;
+          if (availableBudget >= needed) {
+            sendAmt = needed;
+          } else if (availableBudget >= Math.max(50, botTr * 0.90)) {
+            sendAmt = availableBudget;
+          }
+
+          if (sendAmt >= 1) {
+            const ok = sendPacket({ type: "attack", targetID: String(botId), troops: sendAmt });
+            if (ok) {
+              attacked++;
+              this.botAttackTroopsSent += sendAmt;
+              availableBudget -= sendAmt;
+              this.stats.attacksSent++;
+              this.stats.troopsSentTotal += sendAmt;
+            }
           }
         }
         if (attacked > 0) {
