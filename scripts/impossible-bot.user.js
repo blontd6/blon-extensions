@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Impossible Bot (Autoplay)
 // @namespace    http://tampermonkey.net/
-// @version      2.1.0
+// @version      3.0.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -37,10 +37,10 @@
         buildDefensePosts: true,
         allowAtomBombs: false, 
         allowHydrogenBombs: true, 
-        triggerRatio: 0.50,
-        reserveRatio: 0.30,
-        expandRatio: 0.10,
-        botParallelism: 60,
+        triggerRatio: 0.35,
+        reserveRatio: 0.15,
+        expandRatio: 0.05,
+        botParallelism: 80,
         autoAttack: true,
         autoExpand: true,
         autoDefend: true,
@@ -51,7 +51,7 @@
         autoDonate: false,
         autoBoat: true,
         autoWarship: true,
-        tickIntervalMs: 650
+        tickIntervalMs: 400
       },
       solo: {
         id: "solo",
@@ -515,255 +515,379 @@
       return null;
     }
 
-    function find1v1CityTile(game, myPlayer, existingCities = [], opponent = null) {
+    const OppTracker = {
+      samples: [],
+      maxSamples: 10,
+      lastTroops: 0,
+      lastGold: 0,
+      lastTiles: 0,
+      isPunishWindow: false,
+      punishExpiry: 0,
+      expansionRate: 0,
+      update(opponent) {
+        if (!opponent) return;
+        const troops = playerTroops(opponent);
+        const gold = playerGold(opponent);
+        const tiles = typeof opponent.numTilesOwned === "function" ? Number(opponent.numTilesOwned()) || 0 : 0;
+        const now = Date.now();
+        if (this.lastTroops > 0 && troops < this.lastTroops * 0.78) {
+          this.isPunishWindow = true;
+          this.punishExpiry = now + 3000;
+        }
+        if (now > this.punishExpiry) this.isPunishWindow = false;
+        if (this.samples.length >= 3) {
+          const oldest = this.samples[0];
+          const dt = Math.max(1, (now - oldest.time) / 1000);
+          this.expansionRate = (tiles - oldest.tiles) / dt;
+        }
+        this.samples.push({ troops, gold, tiles, time: now });
+        if (this.samples.length > this.maxSamples) this.samples.shift();
+        this.lastTroops = troops;
+        this.lastGold = gold;
+        this.lastTiles = tiles;
+      },
+      reset() {
+        this.samples = [];
+        this.lastTroops = 0;
+        this.lastGold = 0;
+        this.lastTiles = 0;
+        this.isPunishWindow = false;
+        this.punishExpiry = 0;
+        this.expansionRate = 0;
+      }
+    };
+
+    function analyzeFrontline(game, myPlayer, opponent) {
+      if (!opponent) return null;
+      const myID = getMySmallID(myPlayer);
+      const oppID = getMySmallID(opponent);
+      if (!myID || !oppID) return null;
+      const myBts = getBorderTiles(game, myPlayer);
+      const w = typeof game.width === "function" ? game.width() : 500;
+      const sharedBorder = [];
+      const weakPoints = [];
+      for (const tile of myBts) {
+        let adj = false;
+        forEachNeighbor(game, tile, (n) => {
+          try { if (game.ownerID(n) === oppID) adj = true; } catch (e) {}
+        });
+        if (adj) sharedBorder.push(tile);
+      }
+      if (sharedBorder.length === 0) return { sharedBorder: [], centroid: null, weakPoints: [], width: 0, isBordering: false };
+      let cx = 0, cy = 0;
+      for (const t of sharedBorder) { cx += t % w; cy += Math.floor(t / w); }
+      cx /= sharedBorder.length;
+      cy /= sharedBorder.length;
+      const step = Math.max(1, Math.floor(sharedBorder.length / 15));
+      for (let i = 0; i < sharedBorder.length; i += step) {
+        const tile = sharedBorder[i];
+        const tx = tile % w, ty = Math.floor(tile / w);
+        let oppNear = 0;
+        for (let dx = -4; dx <= 4; dx++) {
+          for (let dy = -4; dy <= 4; dy++) {
+            try {
+              const ref = typeof game.ref === "function" ? game.ref(tx + dx, ty + dy) : null;
+              if (ref != null && game.ownerID(ref) === oppID) oppNear++;
+            } catch (e) {}
+          }
+        }
+        if (oppNear < 25) weakPoints.push(tile);
+      }
+      return { sharedBorder, centroid: { x: cx, y: cy }, weakPoints, width: sharedBorder.length, isBordering: true };
+    }
+
+    function findCutTarget(game, opponent) {
+      if (!opponent) return null;
+      const oppID = getMySmallID(opponent);
+      if (!oppID) return null;
+      const w = typeof game.width === "function" ? game.width() : 500;
+      const oppBts = Array.from(getBorderTiles(game, opponent));
+      if (oppBts.length < 30) return null;
+      let bestTile = null, bestScore = Infinity;
+      const stp = Math.max(1, Math.floor(oppBts.length / 30));
+      for (let i = 0; i < oppBts.length; i += stp) {
+        const tile = oppBts[i];
+        const tx = tile % w, ty = Math.floor(tile / w);
+        let hCount = 0, vCount = 0;
+        for (let d = -6; d <= 6; d++) {
+          try {
+            const hr = typeof game.ref === "function" ? game.ref(tx + d, ty) : null;
+            if (hr != null && game.ownerID(hr) === oppID) hCount++;
+            const vr = typeof game.ref === "function" ? game.ref(tx, ty + d) : null;
+            if (vr != null && game.ownerID(vr) === oppID) vCount++;
+          } catch (e) {}
+        }
+        const narrowness = Math.min(hCount, vCount);
+        if (narrowness < bestScore && narrowness >= 1 && narrowness <= 5) {
+          bestScore = narrowness;
+          bestTile = tile;
+        }
+      }
+      return bestTile;
+    }
+
+    function getGamePhase(game) {
+      try {
+        const ticks = typeof game.ticks === "function" ? game.ticks() : 0;
+        if (ticks < 300) return "early";
+        if (ticks < 800) return "mid";
+        return "late";
+      } catch (e) { return "mid"; }
+    }
+
+    function getDynamicReserve(game, myPlayer, opponent, phase) {
+      if (phase === "early") return 0.08;
+      if (opponent) {
+        const oppUnits = playerUnits(opponent);
+        if (oppUnits.some(u => unitType(u) === "Missile Silo")) return 0.40;
+        const oppTr = playerTroops(opponent);
+        const myTr = playerTroops(myPlayer);
+        if (oppTr < myTr * 0.25) return 0.10;
+      }
+      if (phase === "mid") return 0.22;
+      return 0.28;
+    }
+
+    function find1v1CityTile(game, myPlayer, existingCities = [], opponent = null, cityIndex = 0) {
       try {
         const interiorList = getInteriorTiles(game, myPlayer);
         if (interiorList.length === 0) return null;
-
         const w = typeof game.width === "function" ? game.width() : 500;
         const oppBts = opponent ? Array.from(getBorderTiles(game, opponent)) : [];
-        const oppCenter = opponent ? getPlayerCenter(game, opponent) : { x: -1, y: -1 };
+        const oppCenter = opponent ? getPlayerCenter(game, opponent) : null;
         const myCenter = getPlayerCenter(game, myPlayer);
-
         const existingCityTiles = existingCities.map(c => {
           const t = typeof c.tile === "function" ? c.tile() : c.tile;
           return typeof t === "number" ? t : null;
         }).filter(t => t !== null);
-
-        let bestTile = null;
-        let bestScore = -Infinity;
-
-        const sampleSize = Math.min(interiorList.length, 120);
+        let bestTile = null, bestScore = -Infinity;
+        const sampleSize = Math.min(interiorList.length, 150);
         for (let i = 0; i < sampleSize; i++) {
           const tile = interiorList[Math.floor(Math.random() * interiorList.length)];
           const tx = tile % w, ty = Math.floor(tile / w);
-
-          
           let minDistToCity = Infinity;
-          for (const cTile of existingCityTiles) {
-            const d = calcTileDist(game, tile, cTile);
+          for (const ct of existingCityTiles) {
+            const d = calcTileDist(game, tile, ct);
             if (d < minDistToCity) minDistToCity = d;
           }
-          if (existingCityTiles.length > 0 && minDistToCity < 16) continue;
-
-          
-          let minDistToOppBorder = Infinity;
-          if (oppBts.length > 0) {
-            const oppSample = Math.min(oppBts.length, 30);
-            for (let j = 0; j < oppSample; j++) {
-              const ot = oppBts[Math.floor(j * oppBts.length / oppSample)];
-              const d = calcTileDist(game, tile, ot);
-              if (d < minDistToOppBorder) minDistToOppBorder = d;
+          if (existingCityTiles.length > 0 && minDistToCity < 12) continue;
+          let score = 0;
+          if (cityIndex === 0) {
+            const distToCenter = Math.hypot(tx - myCenter.x, ty - myCenter.y);
+            score = 100 - distToCenter * 0.5;
+          } else if (cityIndex === 1) {
+            if (oppCenter) {
+              const distToOpp = Math.hypot(tx - oppCenter.x, ty - oppCenter.y);
+              score = 80 - distToOpp * 0.3;
             }
-            if (minDistToOppBorder < 20) continue;
+            score += Math.min(minDistToCity, 30) * 0.8;
+          } else {
+            if (oppCenter) {
+              const distFromOpp = Math.hypot(tx - oppCenter.x, ty - oppCenter.y);
+              score = distFromOpp * 1.2;
+            }
+            let minOppBorderDist = Infinity;
+            if (oppBts.length > 0) {
+              const sample = Math.min(oppBts.length, 20);
+              for (let j = 0; j < sample; j++) {
+                const d = calcTileDist(game, tile, oppBts[Math.floor(j * oppBts.length / sample)]);
+                if (d < minOppBorderDist) minOppBorderDist = d;
+              }
+              if (minOppBorderDist < 15) continue;
+              score += minOppBorderDist * 0.6;
+            }
           }
-
-          
-          let score = existingCityTiles.length === 0 ? 50 : Math.min(minDistToCity, 40);
-
-          if (oppCenter.x >= 0) {
-            const distFromOpp = Math.hypot(tx - oppCenter.x, ty - oppCenter.y);
-            score += distFromOpp * 0.8;
-          }
-
-          if (minDistToOppBorder !== Infinity) {
-            score += minDistToOppBorder * 0.5;
-          }
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestTile = tile;
-          }
+          if (score > bestScore) { bestScore = score; bestTile = tile; }
         }
-
         return bestTile || interiorList[0] || null;
-      } catch (e) {
-        return null;
-      }
+      } catch (e) { return null; }
     }
 
-    function find1v1DefensePostTile(game, myPlayer, opponent, existingDPs = []) {
+    function find1v1DefensePostTile(game, myPlayer, opponent, existingDPs = [], frontline = null) {
       try {
         if (!opponent) return null;
-        const myBts = Array.from(getBorderTiles(game, myPlayer));
-        if (myBts.length === 0) return null;
-
-        const oppBts = Array.from(getBorderTiles(game, opponent));
-        if (oppBts.length === 0) return null;
-
+        const candidates = frontline && frontline.sharedBorder.length > 0
+          ? frontline.sharedBorder
+          : Array.from(getBorderTiles(game, myPlayer));
+        if (candidates.length === 0) return null;
         const existingDPTiles = existingDPs.map(d => {
           const t = typeof d.tile === "function" ? d.tile() : d.tile;
           return typeof t === "number" ? t : null;
         }).filter(t => t !== null);
-
         const interiorTiles = getInteriorTiles(game, myPlayer);
-        const candidatePool = interiorTiles.length > 0 ? interiorTiles : myBts;
-
-        let bestTile = null;
-        let bestScore = -Infinity;
-
+        const candidatePool = interiorTiles.length > 10 ? interiorTiles : candidates;
+        let bestTile = null, bestScore = -Infinity;
+        const oppBts = Array.from(getBorderTiles(game, opponent));
         const sampleSize = Math.min(candidatePool.length, 100);
         for (let i = 0; i < sampleSize; i++) {
           const tile = candidatePool[Math.floor(Math.random() * candidatePool.length)];
-
-          
-          let minDistToOtherDP = Infinity;
-          for (const dpTile of existingDPTiles) {
-            const d = calcTileDist(game, tile, dpTile);
-            if (d < minDistToOtherDP) minDistToOtherDP = d;
+          let minDPDist = Infinity;
+          for (const dp of existingDPTiles) {
+            const d = calcTileDist(game, tile, dp);
+            if (d < minDPDist) minDPDist = d;
           }
-          if (existingDPTiles.length > 0 && minDistToOtherDP < 22) continue;
-
-          
-          let minDistToOpp = Infinity;
-          for (let j = 0; j < Math.min(oppBts.length, 30); j++) {
-            const ot = oppBts[Math.floor(j * oppBts.length / 30)];
-            const d = calcTileDist(game, tile, ot);
-            if (d < minDistToOpp) minDistToOpp = d;
+          if (existingDPTiles.length > 0 && minDPDist < 18) continue;
+          let minOppDist = Infinity;
+          for (let j = 0; j < Math.min(oppBts.length, 25); j++) {
+            const d = calcTileDist(game, tile, oppBts[Math.floor(j * oppBts.length / 25)]);
+            if (d < minOppDist) minOppDist = d;
           }
-
-          
-          if (minDistToOpp > 30 || minDistToOpp < 4) continue;
-
-          
-          const optimalDistScore = 30 - Math.abs(minDistToOpp - 12);
-          const spreadScore = existingDPTiles.length > 0 ? Math.min(minDistToOtherDP, 45) : 30;
-          const score = optimalDistScore * 1.5 + spreadScore;
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestTile = tile;
-          }
+          if (minOppDist > 25 || minOppDist < 3) continue;
+          const optScore = 20 - Math.abs(minOppDist - 8);
+          const spread = existingDPTiles.length > 0 ? Math.min(minDPDist, 40) : 25;
+          const score = optScore * 2 + spread;
+          if (score > bestScore) { bestScore = score; bestTile = tile; }
         }
-
         return bestTile;
-      } catch (e) {
-        return null;
-      }
+      } catch (e) { return null; }
     }
 
     function find1v1SiloTile(game, myPlayer, opponent) {
       try {
         const interiorList = getInteriorTiles(game, myPlayer);
         if (interiorList.length === 0) return null;
-
-        const w = typeof game.width === "function" ? game.width() : 500;
         const oppBts = opponent ? Array.from(getBorderTiles(game, opponent)) : [];
-        const oppCenter = opponent ? getPlayerCenter(game, opponent) : { x: -1, y: -1 };
-
-        let bestTile = null;
-        let maxSafety = -Infinity;
-
+        let bestTile = null, maxSafety = -Infinity;
         const sampleSize = Math.min(interiorList.length, 80);
         for (let i = 0; i < sampleSize; i++) {
           const tile = interiorList[Math.floor(Math.random() * interiorList.length)];
-          const tx = tile % w, ty = Math.floor(tile / w);
-
-          let minDistToOpp = Infinity;
+          let minDist = Infinity;
           if (oppBts.length > 0) {
-            for (let j = 0; j < Math.min(oppBts.length, 25); j++) {
-              const ot = oppBts[Math.floor(j * oppBts.length / 25)];
-              const d = calcTileDist(game, tile, ot);
-              if (d < minDistToOpp) minDistToOpp = d;
+            for (let j = 0; j < Math.min(oppBts.length, 20); j++) {
+              const d = calcTileDist(game, tile, oppBts[Math.floor(j * oppBts.length / 20)]);
+              if (d < minDist) minDist = d;
             }
           }
-
-          let score = minDistToOpp;
-          if (oppCenter.x >= 0) {
-            score += Math.hypot(tx - oppCenter.x, ty - oppCenter.y) * 0.7;
-          }
-
-          if (score > maxSafety) {
-            maxSafety = score;
-            bestTile = tile;
-          }
+          if (minDist > maxSafety) { maxSafety = minDist; bestTile = tile; }
         }
-
         return bestTile || interiorList[0] || null;
-      } catch (e) {
-        return null;
-      }
+      } catch (e) { return null; }
     }
 
     function find1v1FlankShoreTile(game, myPlayer, opponent) {
       try {
         const oppBts = Array.from(getBorderTiles(game, opponent));
         if (oppBts.length === 0) return null;
-
         const oppUnits = playerUnits(opponent);
         const dpTiles = oppUnits.filter(u => unitType(u) === "Defense Post").map(u => {
           const t = typeof u.tile === "function" ? u.tile() : u.tile;
           return typeof t === "number" ? t : null;
         }).filter(t => t !== null);
-
-        let bestTile = null;
-        let maxDistToDP = -Infinity;
-
-        for (const tile of oppBts) {
-          if (typeof game.isShore === "function" && !game.isShore(tile)) continue;
-          let minDistToAnyDP = Infinity;
-          for (const dp of dpTiles) {
-            const d = calcTileDist(game, tile, dp);
-            if (d < minDistToAnyDP) minDistToAnyDP = d;
-          }
-
-          if (minDistToAnyDP > maxDistToDP) {
-            maxDistToDP = minDistToAnyDP;
-            bestTile = tile;
+        const cityTiles = oppUnits.filter(u => unitType(u) === "City").map(u => {
+          const t = typeof u.tile === "function" ? u.tile() : u.tile;
+          return typeof t === "number" ? t : null;
+        }).filter(t => t !== null);
+        if (cityTiles.length > 0) {
+          const myCenter = getPlayerCenter(game, myPlayer);
+          const w = typeof game.width === "function" ? game.width() : 500;
+          const scored = cityTiles.map(ct => ({
+            tile: ct,
+            dist: Math.hypot((ct % w) - myCenter.x, Math.floor(ct / w) - myCenter.y)
+          }));
+          scored.sort((a, b) => b.dist - a.dist);
+          for (const { tile: ct } of scored) {
+            const cx = ct % w, cy = Math.floor(ct / w);
+            for (let r = 1; r <= 15; r++) {
+              for (let dx = -r; dx <= r; dx++) {
+                for (let dy = -r; dy <= r; dy++) {
+                  if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                  try {
+                    const ref = typeof game.ref === "function" ? game.ref(cx + dx, cy + dy) : null;
+                    if (ref != null && typeof game.isShore === "function" && game.isShore(ref)) {
+                      const oid = typeof game.ownerID === "function" ? game.ownerID(ref) : null;
+                      const oppSID = getMySmallID(opponent);
+                      if (oid === oppSID || (typeof game.hasOwner === "function" && !game.hasOwner(ref))) return ref;
+                    }
+                  } catch (e) {}
+                }
+              }
+            }
           }
         }
-
+        let bestTile = null, maxDistToDP = -Infinity;
+        for (const tile of oppBts) {
+          if (typeof game.isShore === "function" && !game.isShore(tile)) continue;
+          let minDist = dpTiles.length === 0 ? 0 : Infinity;
+          for (const dp of dpTiles) {
+            const d = calcTileDist(game, tile, dp);
+            if (d < minDist) minDist = d;
+          }
+          if (minDist > maxDistToDP) { maxDistToDP = minDist; bestTile = tile; }
+        }
         return bestTile || findTargetShoreTile(game, opponent);
-      } catch (e) {
-        return null;
+      } catch (e) { return null; }
+    }
+
+    function findBestNukeTarget(game, opponent) {
+      if (!opponent) return null;
+      const units = playerUnits(opponent);
+      const priorities = [
+        { type: "City", weight: 100 },
+        { type: "Missile Silo", weight: 90 },
+        { type: "Defense Post", weight: 60 }
+      ];
+      let bestTile = null, bestWeight = -1;
+      for (const prio of priorities) {
+        for (const u of units) {
+          if (unitType(u) === prio.type) {
+            const tile = typeof u.tile === "function" ? u.tile() : u.tile;
+            if (tile != null && prio.weight > bestWeight) {
+              bestWeight = prio.weight;
+              bestTile = tile;
+            }
+          }
+        }
+        if (bestTile != null) break;
       }
+      return bestTile || findTargetShoreTile(game, opponent);
     }
 
     function getEffectiveReserveRatio(game, myPlayer, baseReserveRatio) {
-      let r = baseReserveRatio ?? botCfg.reserveRatio ?? 0.35;
+      let r = baseReserveRatio ?? botCfg.reserveRatio ?? 0.25;
       try {
         const totalLand = (typeof game.numLandTiles === "function" ? game.numLandTiles() : null) || 5000;
         const owned = typeof myPlayer.numTilesOwned === "function" ? Number(myPlayer.numTilesOwned()) : 10;
         const share = owned / Math.max(1, totalLand);
-        r = Math.max(r, Math.min(0.60, share * 1.5));
+        r = Math.max(r, Math.min(0.55, share * 1.3));
       } catch (e) {}
       return r;
     }
 
-    function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio) {
+    function calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio, isKillShot) {
+      if (isKillShot) {
+        const reserve = maxTroops * 0.12;
+        return Math.floor(Math.max(0, myTroops - reserve - (botAttackTroopsSent || 0)));
+      }
       const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
       const reserve = maxTroops * effReserve;
       const available = Math.max(0, myTroops - reserve - (botAttackTroopsSent || 0));
       if (available <= 0) return 0;
-
       const targetTr = playerTroops(target);
       const tgt_is_bot = isBot(target) && !isBot(myPlayer);
-
       let troops;
       if (tgt_is_bot) {
-        let needed = targetTr * 3;
+        let needed = targetTr * 2.5;
         if (needed > available) {
-          if (available < targetTr * 1.5) needed = 0;
+          if (available < targetTr * 1.3) needed = 0;
           else needed = available;
         }
         troops = Math.min(available, needed > 0 ? needed : available);
       } else {
-        const needed = Math.max(targetTr * 1.5, Math.floor(maxTroops * 0.05));
+        const needed = Math.max(targetTr * 1.8, Math.floor(maxTroops * 0.08));
         troops = Math.min(available, needed);
       }
-
-      const maxSendCap = Math.max(1000, Math.floor(myTroops * 0.35));
+      const maxSendCap = Math.max(2000, Math.floor(myTroops * 0.55));
       troops = Math.min(troops, maxSendCap);
-
       return Math.floor(Math.max(0, troops));
     }
 
-    function sendLandAttack(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio) {
-      const troops = calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio);
+    function sendLandAttack(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio, isKillShot) {
+      const troops = calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackTroopsSent, reserveRatio, isKillShot);
       if (troops < 1) return false;
       const id = typeof target.id === "function" ? target.id() : (target.id || null);
       return sendPacket({ type: "attack", targetID: id ? String(id) : null, troops });
     }
+
 
     const Engine = {
       running: botCfg.enabled,
@@ -782,6 +906,7 @@
       lastAttackMs: 0,
       lastBoatFlankTime: 0,
       lastBoatDefenseTime: 0,
+      lastCutAttackTime: 0,
       botAttackTroopsSent: 0,
       targetDetail: "None",
       opponentName: "None",
@@ -860,7 +985,7 @@
         if (!this.behaviorsInitialized) {
           this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
-            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.40);
+            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.80);
             if (burstTroops >= 1) {
               if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
@@ -900,12 +1025,16 @@
         this.oppTroopCap = opponent ? getMaxTroops(game, opponent) : 0;
         this.myTroopCap = getMaxTroops(game, myPlayer);
 
+        if (opponent) OppTracker.update(opponent);
+
+        const phase = getGamePhase(game);
+
         if (botCfg.autoDefend) {
           this.handle1v1BoatDefense(game, myPlayer, opponent);
         }
 
         if (botCfg.autoBuild || botCfg.autoDefend) {
-          this.handle1v1Structures(game, myPlayer, opponent);
+          this.handle1v1Structures(game, myPlayer, opponent, phase);
         }
 
         if (botCfg.autoNuke) {
@@ -913,21 +1042,32 @@
         }
 
         if (botCfg.autoAttack || botCfg.autoExpand) {
-          this.handle1v1Attacks(game, myPlayer, opponent);
+          this.handle1v1Attacks(game, myPlayer, opponent, phase);
         }
       },
 
       get1v1Opponent(game, myPlayer) {
         const all = getAllPlayers(game);
-        const candidates = all.filter(p => {
-          if (!p || isFriendly(myPlayer, p) || !isAlive(p)) return false;
-          return !isBot(p);
+        const myID = getMySmallID(myPlayer);
+        const humanOpponents = all.filter(p => {
+          if (!p || !isAlive(p)) return false;
+          if (getMySmallID(p) === myID || isFriendly(myPlayer, p)) return false;
+          const pType = typeof p.type === "function" ? p.type() : (p.type || "");
+          return pType !== "BOT" && pType !== "NATION" && !isBot(p);
         });
-        if (candidates.length > 0) return candidates[0];
 
-        const bots = all.filter(p => p && !isFriendly(myPlayer, p) && isAlive(p));
-        bots.sort((a, b) => playerTroops(b) - playerTroops(a));
-        return bots[0] || null;
+        if (humanOpponents.length > 0) {
+          humanOpponents.sort((a, b) => playerTroops(b) - playerTroops(a));
+          return humanOpponents[0];
+        }
+
+        const enemies = all.filter(p => {
+          if (!p || !isAlive(p)) return false;
+          if (getMySmallID(p) === myID || isFriendly(myPlayer, p)) return false;
+          return true;
+        });
+        enemies.sort((a, b) => playerTroops(b) - playerTroops(a));
+        return enemies[0] || null;
       },
 
       handleAutoSpawn(game) {
@@ -950,10 +1090,11 @@
       pickSpawnTile(game) {
         const w = typeof game.width === "function" ? game.width() : 500;
         const h = typeof game.height === "function" ? game.height() : 500;
+        const cx = w / 2, cy = h / 2;
         let bestTile = null;
         let bestScore = -Infinity;
 
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 200; i++) {
           const rx = Math.floor(Math.random() * w);
           const ry = Math.floor(Math.random() * h);
           if (typeof game.isValidCoord === "function" && !game.isValidCoord(rx, ry)) continue;
@@ -965,8 +1106,29 @@
           if (typeof game.isBorder === "function" && game.isBorder(ref)) continue;
 
           let score = Math.random() * 5;
-          if (typeof game.isShore === "function" && game.isShore(ref)) score += 15;
-          if (score > bestScore) { bestScore = score; bestTile = ref; }
+          const isShore = typeof game.isShore === "function" && game.isShore(ref);
+          if (isShore) score += 20;
+
+          let landNeighbors = 0;
+          for (let dx = -3; dx <= 3; dx++) {
+            for (let dy = -3; dy <= 3; dy++) {
+              try {
+                const nr = typeof game.ref === "function" ? game.ref(rx + dx, ry + dy) : null;
+                if (nr != null && typeof game.isLand === "function" && game.isLand(nr)) {
+                  landNeighbors++;
+                }
+              } catch (e) {}
+            }
+          }
+          score += landNeighbors * 0.8;
+
+          const distToCenter = Math.hypot(rx - cx, ry - cy);
+          score += Math.min(distToCenter, 150) * 0.15;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestTile = ref;
+          }
         }
         return bestTile;
       },
@@ -975,48 +1137,56 @@
         try {
           if (!opponent) return;
           const now = Date.now();
-          if (now - this.lastBoatDefenseTime < 1500) return;
+          if (now - this.lastBoatDefenseTime < 1200) return;
 
           const oppUnits = playerUnits(opponent);
           const myBts = getBorderTiles(game, myPlayer);
           const myID = getMySmallID(myPlayer);
+          const w = typeof game.width === "function" ? game.width() : 500;
+          const myCenter = getPlayerCenter(game, myPlayer);
 
           for (const unit of oppUnits) {
-            if (unitType(unit) !== "Transport") continue;
+            const uType = unitType(unit);
+            if (uType !== "Transport" && uType !== "Boat") continue;
             const dst = typeof unit.dst === "function" ? unit.dst() : unit.dst;
             if (dst == null) continue;
 
-            const isLandingInOurTerritory = (typeof game.ownerID === "function" && game.ownerID(dst) === myID) || myBts.has(dst);
-            if (!isLandingInOurTerritory) {
-              let closeToOurBorder = false;
+            const dx = dst % w, dy = Math.floor(dst / w);
+            const distToOurCenter = Math.hypot(dx - myCenter.x, dy - myCenter.y);
+            const isOurLand = (typeof game.ownerID === "function" && game.ownerID(dst) === myID) || myBts.has(dst);
+
+            let isFlankingBehindUs = false;
+            if (!isOurLand) {
+              if (distToOurCenter < 80) isFlankingBehindUs = true;
               forEachNeighbor(game, dst, (n) => {
-                if (myBts.has(n)) closeToOurBorder = true;
+                if (myBts.has(n)) isFlankingBehindUs = true;
               });
-              if (!closeToOurBorder) continue;
             }
 
-            const myTr = playerTroops(myPlayer);
-            const maxTr = getMaxTroops(game, myPlayer);
-            const sendAmt = Math.min(myTr * 0.35, Math.max(maxTr * 0.08, 1000));
-            if (sendAmt > 100) {
-              const oppId = typeof opponent.id === "function" ? opponent.id() : opponent.id;
-              const ok = sendPacket({ type: "attack", targetID: String(oppId), troops: Math.floor(sendAmt) });
-              if (ok) {
-                this.lastBoatDefenseTime = now;
-                this.stats.attacksSent++;
-                this.stats.boatDefenses++;
-                this.stats.troopsSentTotal += sendAmt;
-                this.targetDetail = `Intercept Boat #${dst}`;
-                return;
+            if (isOurLand || isFlankingBehindUs) {
+              const myTr = playerTroops(myPlayer);
+              const maxTr = getMaxTroops(game, myPlayer);
+              const sendAmt = Math.min(Math.floor(myTr * 0.40), Math.max(Math.floor(maxTr * 0.10), 2000));
+              if (sendAmt > 200) {
+                const oppId = typeof opponent.id === "function" ? opponent.id() : opponent.id;
+                const ok = sendPacket({ type: "attack", targetID: String(oppId), troops: sendAmt });
+                if (ok) {
+                  this.lastBoatDefenseTime = now;
+                  this.stats.attacksSent++;
+                  this.stats.boatDefenses++;
+                  this.stats.troopsSentTotal += sendAmt;
+                  this.targetDetail = `Intercept Flank #${dst}`;
+                  return;
+                }
               }
             }
           }
         } catch (e) {}
       },
 
-      handle1v1Structures(game, myPlayer, opponent) {
+      handle1v1Structures(game, myPlayer, opponent, phase = "mid") {
         const now = Date.now();
-        if (now - this.lastStructureAttemptTime < 1000) return;
+        if (now - this.lastStructureAttemptTime < 800) return;
         this.lastStructureAttemptTime = now;
 
         const gold = playerGold(myPlayer);
@@ -1028,11 +1198,12 @@
         const defensePosts = units.filter(u => unitType(u) === "Defense Post");
         const silos = countOf("Missile Silo");
 
-        
-        if (botCfg.buildCities && cities.length < 3) {
+        const frontline = analyzeFrontline(game, myPlayer, opponent);
+
+        if (botCfg.buildCities && cities.length < 2) {
           const nextCityCost = Math.min(1000000, Math.pow(2, cities.length) * 125000);
           if (gold >= nextCityCost) {
-            const cityTile = find1v1CityTile(game, myPlayer, cities, opponent);
+            const cityTile = find1v1CityTile(game, myPlayer, cities, opponent, cities.length);
             if (cityTile != null) {
               const ok = sendPacket({ type: "build_unit", unit: "City", tile: cityTile });
               if (ok) {
@@ -1044,31 +1215,59 @@
           }
         }
 
-        
         const maxPosts = botCfg.maxDefensePosts ?? 4;
-        if (botCfg.buildDefensePosts && defensePosts.length < maxPosts && opponent) {
-          const nextDPCost = Math.min(250000, (defensePosts.length + 1) * 50000);
+        if (botCfg.buildDefensePosts && defensePosts.length < 1 && cities.length >= 1 && opponent) {
+          const nextDPCost = (defensePosts.length + 1) * 50000;
           if (gold >= nextDPCost) {
-            const dpTile = find1v1DefensePostTile(game, myPlayer, opponent, defensePosts);
+            const dpTile = find1v1DefensePostTile(game, myPlayer, opponent, defensePosts, frontline);
             if (dpTile != null) {
               const ok = sendPacket({ type: "build_unit", unit: "Defense Post", tile: dpTile });
               if (ok) {
                 this.stats.structuresBuilt++;
-                this.targetDetail = `Border Defense Post #${dpTile}`;
+                this.targetDetail = `Frontline DP #${dpTile}`;
                 return;
               }
             }
           }
         }
 
-        
+        if (botCfg.buildCities && cities.length < 3) {
+          const nextCityCost = Math.min(1000000, Math.pow(2, cities.length) * 125000);
+          if (gold >= nextCityCost) {
+            const cityTile = find1v1CityTile(game, myPlayer, cities, opponent, cities.length);
+            if (cityTile != null) {
+              const ok = sendPacket({ type: "build_unit", unit: "City", tile: cityTile });
+              if (ok) {
+                this.stats.structuresBuilt++;
+                this.targetDetail = `Build City 3/3`;
+                return;
+              }
+            }
+          }
+        }
+
+        if (botCfg.buildDefensePosts && defensePosts.length < maxPosts && opponent) {
+          const nextDPCost = Math.min(250000, (defensePosts.length + 1) * 50000);
+          if (gold >= nextDPCost) {
+            const dpTile = find1v1DefensePostTile(game, myPlayer, opponent, defensePosts, frontline);
+            if (dpTile != null) {
+              const ok = sendPacket({ type: "build_unit", unit: "Defense Post", tile: dpTile });
+              if (ok) {
+                this.stats.structuresBuilt++;
+                this.targetDetail = `Frontline DP ${defensePosts.length + 1}`;
+                return;
+              }
+            }
+          }
+        }
+
         if (botCfg.buildSilos && silos < 1 && cities.length >= 3 && gold >= 1000000) {
           const siloTile = find1v1SiloTile(game, myPlayer, opponent);
           if (siloTile != null) {
             const ok = sendPacket({ type: "build_unit", unit: "Missile Silo", tile: siloTile });
             if (ok) {
               this.stats.structuresBuilt++;
-              this.targetDetail = "Build Missile Silo";
+              this.targetDetail = "Build Missile Silo (Lvl 1)";
               return;
             }
           }
@@ -1077,7 +1276,7 @@
 
       handle1v1Nukes(game, myPlayer, opponent) {
         const now = Date.now();
-        if (now - this.lastNukeAttemptTime < 4000) return;
+        if (now - this.lastNukeAttemptTime < 3000) return;
         this.lastNukeAttemptTime = now;
 
         const gold = playerGold(myPlayer);
@@ -1095,30 +1294,35 @@
         }
         if (!bombType) return;
 
-        
-        const targetTile = findTargetCityTile(opponent) || find1v1FlankShoreTile(game, myPlayer, opponent) || findTargetShoreTile(game, opponent);
+        const targetTile = findBestNukeTarget(game, opponent) || find1v1FlankShoreTile(game, myPlayer, opponent) || findTargetShoreTile(game, opponent);
         if (targetTile != null) {
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
             this.targetDetail = `${bombType} -> ${this.opponentName}`;
             if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.RADIATION);
+
+            const myTroops = playerTroops(myPlayer);
+            const assaultTroops = Math.floor(myTroops * 0.60);
+            if (assaultTroops > 1000) {
+              const oppId = typeof opponent.id === "function" ? opponent.id() : opponent.id;
+              sendPacket({ type: "attack", targetID: String(oppId), troops: assaultTroops });
+              this.stats.attacksSent++;
+              this.stats.troopsSentTotal += assaultTroops;
+            }
           }
         }
       },
 
-      handle1v1Attacks(game, myPlayer, opponent) {
+      handle1v1Attacks(game, myPlayer, opponent, phase = "mid") {
         const myTroops = playerTroops(myPlayer);
         if (myTroops <= 0) return;
 
         const maxTroops = getMaxTroops(game, myPlayer);
-        const triggerRatio = botCfg.triggerRatio ?? 0.50;
-        const reserveRatio = botCfg.reserveRatio ?? 0.30;
-        const expandRatio = botCfg.expandRatio ?? 0.10;
-        const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
+        const dynamicReserve = getDynamicReserve(game, myPlayer, opponent, phase);
         const troopRatio = myTroops / maxTroops;
+        const now = Date.now();
 
-        
         const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
         if (incoming.length > 0 && botCfg.autoDefend) {
           let bestAtk = null, bestTr = 0;
@@ -1130,9 +1334,9 @@
             if (tr > bestTr) { bestTr = tr; bestAtk = attacker; }
           }
           if (bestAtk) {
-            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
+            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, false);
             if (ok) {
-              this.lastAttackMs = Date.now();
+              this.lastAttackMs = now;
               this.stats.attacksSent++;
               this.targetDetail = `Defend vs ${getPlayerName(bestAtk)}`;
               if (botCfg.autoEmoji === true) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
@@ -1143,45 +1347,47 @@
 
         const borderingMap = getBorderingPlayerIDs(game, myPlayer);
         const borderingEnemies = Array.from(borderingMap.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
-
-        
         const borderingBots = borderingEnemies.filter(p => isBot(p));
-        if (botCfg.autoAttack && borderingBots.length > 0 && troopRatio >= effReserve) {
-          borderingBots.sort((a, b) => {
-            const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
-            const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
-            
-            if ((aTiles < 120) !== (bTiles < 120)) return aTiles < 120 ? -1 : 1;
-            return aTiles - bTiles;
-          });
 
-          if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, reserveRatio)) {
-            this.targetDetail = "Annex/Split Bots";
-            return;
-          }
-        }
+        const isOpponentBordering = opponent && borderingEnemies.some(p => {
+          const id1 = typeof p.id === "function" ? p.id() : p.id;
+          const id2 = typeof opponent.id === "function" ? opponent.id() : opponent.id;
+          return id1 === id2;
+        });
 
-        
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const now = Date.now();
-          if (now - this.lastExpandMs >= 1600) {
-            const expandReserve = maxTroops * expandRatio;
+          const expandInterval = phase === "early" ? 400 : 900;
+          if (now - this.lastExpandMs >= expandInterval) {
+            const expandReserve = maxTroops * (phase === "early" ? 0.05 : botCfg.expandRatio ?? 0.08);
             const available = myTroops - expandReserve;
             if (available > 0) {
-              
-              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.03, myTroops * 0.15)));
-              if (troopsToSend >= Math.max(1, maxTroops * 0.015)) {
+              const expandPercent = phase === "early" ? 0.35 : 0.20;
+              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * expandPercent)));
+              if (troopsToSend >= 1) {
                 const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
                 if (ok) {
                   this.lastExpandMs = now;
                   this.stats.attacksSent++;
                   this.stats.expandsDone++;
                   this.stats.troopsSentTotal += troopsToSend;
-                  this.targetDetail = "Max Cap Expand";
-                  return;
+                  this.targetDetail = phase === "early" ? "Early Rush Expand" : "Territory Expansion";
+                  if (phase === "early") return;
                 }
               }
             }
+          }
+        }
+
+        if (botCfg.autoAttack && borderingBots.length > 0 && troopRatio >= dynamicReserve) {
+          borderingBots.sort((a, b) => {
+            const aTr = playerTroops(a);
+            const bTr = playerTroops(b);
+            return aTr - bTr;
+          });
+
+          if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, dynamicReserve)) {
+            this.targetDetail = "Annex Bots";
+            return;
           }
         }
 
@@ -1190,65 +1396,84 @@
         const oppTroops = playerTroops(opponent);
         const oppUnits = playerUnits(opponent);
         const oppHasDP = oppUnits.some(u => unitType(u) === "Defense Post");
-        const now = Date.now();
 
-        
-        if (botCfg.autoBoat && oppHasDP && (now - this.lastBoatFlankTime > 4500) && troopRatio >= 0.35) {
-          this.lastBoatFlankTime = now;
-          const flankTile = find1v1FlankShoreTile(game, myPlayer, opponent);
-          if (flankTile != null) {
-            const boatTroops = Math.min(Math.floor(myTroops * 0.25), 300000);
-            if (boatTroops > 500) {
-              const ok = sendPacket({ type: "boat", dst: flankTile, troops: boatTroops });
+        if (now - this.lastCutAttackTime > 3000 && troopRatio >= 0.30) {
+          const cutTile = findCutTarget(game, opponent);
+          if (cutTile != null) {
+            const cutTroops = Math.floor(Math.min(myTroops * 0.30, maxTroops * 0.25));
+            if (cutTroops > 1000) {
+              const oppId = typeof opponent.id === "function" ? opponent.id() : opponent.id;
+              const ok = sendPacket({ type: "attack", targetID: String(oppId), troops: cutTroops });
               if (ok) {
+                this.lastCutAttackTime = now;
                 this.stats.attacksSent++;
-                this.stats.boatsSent++;
-                this.stats.troopsSentTotal += boatTroops;
-                this.targetDetail = `Boat Flank #${flankTile}`;
+                this.stats.troopsSentTotal += cutTroops;
+                this.targetDetail = `Cut Isthmus #${cutTile}`;
                 return;
               }
             }
           }
         }
 
-        
-        if (now - this.lastAttackMs >= 1000) {
-          const isOpponentBordering = borderingEnemies.some(p => {
-            const id1 = typeof p.id === "function" ? p.id() : p.id;
-            const id2 = typeof opponent.id === "function" ? opponent.id() : opponent.id;
-            return id1 === id2;
-          });
+        if (botCfg.autoBoat && (now - this.lastBoatFlankTime > 3500) && troopRatio >= 0.30) {
+          const shouldSendBoat = oppHasDP || !isOpponentBordering || phase === "late";
+          if (shouldSendBoat) {
+            const flankTile = find1v1FlankShoreTile(game, myPlayer, opponent);
+            if (flankTile != null) {
+              const boatTroops = Math.min(Math.floor(myTroops * 0.28), 350000);
+              if (boatTroops > 500) {
+                const ok = sendPacket({ type: "boat", dst: flankTile, troops: boatTroops });
+                if (ok) {
+                  this.lastBoatFlankTime = now;
+                  this.stats.attacksSent++;
+                  this.stats.boatsSent++;
+                  this.stats.troopsSentTotal += boatTroops;
+                  this.targetDetail = `Rear Flank Boat #${flankTile}`;
+                  return;
+                }
+              }
+            }
+          }
+        }
 
-          if (isOpponentBordering) {
-            const oppWeak = oppTroops < myTroops * 0.70 && troopRatio >= effReserve;
-            const readyToStrike = troopRatio >= triggerRatio && oppTroops < myTroops * 1.1;
+        if (isOpponentBordering && (now - this.lastAttackMs >= 600)) {
+          const isKillShot = oppTroops < myTroops * 0.28;
+          const isPunish = OppTracker.isPunishWindow;
+          const hasAdvantage = myTroops > oppTroops * 1.15 && troopRatio >= (botCfg.triggerRatio ?? 0.35);
+          const latePhasePush = phase === "late" && myTroops > oppTroops * 0.95 && troopRatio >= 0.40;
 
-            if (oppWeak || readyToStrike) {
-              const ok = sendLandAttack(game, myPlayer, opponent, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
-              if (ok) {
-                this.lastAttackMs = now;
-                this.stats.attacksSent++;
-                this.targetDetail = `Assault ${this.opponentName}`;
+          if (isKillShot || isPunish || hasAdvantage || latePhasePush) {
+            const ok = sendLandAttack(game, myPlayer, opponent, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, isKillShot);
+            if (ok) {
+              this.lastAttackMs = now;
+              this.stats.attacksSent++;
+              if (isKillShot) {
+                this.targetDetail = `KILL SHOT -> ${this.opponentName}`;
+                if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.SKULL);
+              } else if (isPunish) {
+                this.targetDetail = `PUNISH WINDOW -> ${this.opponentName}`;
                 if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.DEVIL);
-                return;
+              } else {
+                this.targetDetail = `Assault -> ${this.opponentName}`;
+                if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.SWORD);
               }
+              return;
             }
           }
         }
 
-        
-        if (botCfg.autoBoat && borderingEnemies.length === 0 && (now - this.lastBoatFlankTime > 4000) && troopRatio >= 0.35) {
+        if (botCfg.autoBoat && !isOpponentBordering && (now - this.lastBoatFlankTime > 3000) && troopRatio >= 0.28) {
           this.lastBoatFlankTime = now;
           const destTile = findTargetCityTile(opponent) || findTargetShoreTile(game, opponent);
           if (destTile != null) {
-            const boatTroops = Math.min(Math.floor(myTroops * 0.20), 250000);
+            const boatTroops = Math.min(Math.floor(myTroops * 0.25), 300000);
             if (boatTroops > 500) {
               const ok = sendPacket({ type: "boat", dst: destTile, troops: boatTroops });
               if (ok) {
                 this.stats.attacksSent++;
                 this.stats.boatsSent++;
                 this.stats.troopsSentTotal += boatTroops;
-                this.targetDetail = `Naval Assault #${destTile}`;
+                this.targetDetail = `Naval Invasion #${destTile}`;
                 return;
               }
             }
@@ -1860,7 +2085,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Impossible Bot (Autoplay)",
-      version: "2.1.0",
+      version: "3.0.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",

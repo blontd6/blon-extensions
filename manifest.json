@@ -4,7 +4,7 @@
     "name": "Impossible Bot (Autoplay)",
     "description": "Autoplay extension featuring OpenFront 1v1 Sweaty Meta and Solo Impossible AI",
     "author": "blon",
-    "version": "2.1.0",
+    "version": "3.0.0",
     "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/impossible-bot.user.js"
   }
 ]
