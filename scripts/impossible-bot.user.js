@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Blon Extension: Impossible Bot (Autoplay)
+// @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
 // @version      3.2.0
 // @description  Autoplay extension
@@ -2405,8 +2405,8 @@
 
     api.registerExtension({
       id: "impossible-bot",
-      name: "Impossible Bot (Autoplay)",
-      version: "3.0.0",
+      name: "Autoplay Bot",
+      version: "3.2.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",

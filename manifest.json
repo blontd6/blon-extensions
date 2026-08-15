@@ -1,7 +1,7 @@
 [
   {
     "id": "impossible-bot",
-    "name": "Impossible Bot (Autoplay)",
+    "name": "Autoplay Bot",
     "description": "Autoplay extension featuring OpenFront 1v1 Sweaty Meta and Solo Impossible AI",
     "author": "blon",
     "version": "3.2.0",
