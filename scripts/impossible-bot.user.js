@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.9.0
+// @version      3.9.1
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -1939,9 +1939,9 @@
         borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
 
         if (botCfg.autoAttack) {
-          const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
-          if (borderingBotsWithStructs.length > 0) {
-            if (this.attackBots(borderingBotsWithStructs, game, myPlayer, myTroops, maxTroops, reserveRatio)) return;
+          const borderingBots = borderingEnemies.filter(p => isBot(p));
+          if (borderingBots.length > 0) {
+            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, reserveRatio)) return;
           }
         }
 
@@ -2054,16 +2054,16 @@
         let attacked = 0;
         const cap = Math.max(1, Math.min(100, botCfg.botParallelism || 50));
         bots.sort((a, b) => {
-          const aStr = playerOwnsStructures(a);
-          const bStr = playerOwnsStructures(b);
-          if (aStr !== bStr) return aStr ? -1 : 1;
-
           const aPlan = findBotEncirclementPlan(game, myPlayer, a);
           const bPlan = findBotEncirclementPlan(game, myPlayer, b);
           const aW = aPlan ? aPlan.walledRatio : 0;
           const bW = bPlan ? bPlan.walledRatio : 0;
 
           if ((aW >= 0.60) !== (bW >= 0.60)) return aW >= 0.60 ? -1 : 1;
+
+          const aStr = playerOwnsStructures(a);
+          const bStr = playerOwnsStructures(b);
+          if (aStr !== bStr) return aStr ? -1 : 1;
 
           const aTr = playerTroops(a);
           const bTr = playerTroops(b);
@@ -2529,7 +2529,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.9.0",
+      version: "3.9.1",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
