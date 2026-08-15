@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.6.0
+// @version      3.7.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -765,6 +765,116 @@
       }
       
       return bestResult;
+    }
+
+    function findBotEncirclementPlan(game, myPlayer, bot) {
+      if (!bot || !myPlayer) return null;
+      const botID = getMySmallID(bot);
+      const myID = getMySmallID(myPlayer);
+      if (!botID || !myID) return null;
+      const w = typeof game.width === "function" ? game.width() : 500;
+      const botBts = Array.from(getBorderTiles(game, bot));
+      if (botBts.length === 0) return null;
+
+      let myBorderCount = 0;
+      let totalBorderChecks = 0;
+      const unownedPerimeter = new Set();
+      let bestShoreBehind = null;
+      let maxDistFromMe = 0;
+      const myCenter = getPlayerCenter(game, myPlayer);
+
+      for (const bt of botBts) {
+        forEachNeighbor(game, bt, (n) => {
+          totalBorderChecks++;
+          try {
+            const owner = game.ownerID(n);
+            if (owner === myID) {
+              myBorderCount++;
+            } else if (owner === 0 || owner === null || owner === undefined) {
+              unownedPerimeter.add(n);
+              if (game.isShore(n) && myCenter) {
+                const nx = n % w, ny = Math.floor(n / w);
+                const d = Math.hypot(nx - myCenter.x, ny - myCenter.y);
+                if (d > maxDistFromMe) {
+                  maxDistFromMe = d;
+                  bestShoreBehind = n;
+                }
+              }
+            }
+          } catch (e) {}
+        });
+      }
+
+      const walledRatio = myBorderCount / Math.max(1, totalBorderChecks);
+      return {
+        bot,
+        botID,
+        botTiles: typeof bot.numTilesOwned === "function" ? Number(bot.numTilesOwned()) || 1 : 1,
+        walledRatio,
+        unownedCount: unownedPerimeter.size,
+        unownedPerimeter: Array.from(unownedPerimeter),
+        bestShoreBehind
+      };
+    }
+
+    function findOurVulnerableNecks(game, myPlayer, opponent) {
+      if (!myPlayer) return null;
+      const myID = getMySmallID(myPlayer);
+      const oppID = opponent ? getMySmallID(opponent) : null;
+      if (!myID) return null;
+      const w = typeof game.width === "function" ? game.width() : 500;
+      const myBts = Array.from(getBorderTiles(game, myPlayer));
+      if (myBts.length < 20) return null;
+
+      const step = Math.max(1, Math.floor(myBts.length / 25));
+      for (let i = 0; i < myBts.length; i += step) {
+        const tile = myBts[i];
+        const tx = tile % w, ty = Math.floor(tile / w);
+
+        let oppNear = false;
+        if (oppID) {
+          for (let dx = -15; dx <= 15; dx += 3) {
+            for (let dy = -15; dy <= 15; dy += 3) {
+              try {
+                const ref = typeof game.ref === "function" ? game.ref(tx + dx, ty + dy) : null;
+                if (ref != null && game.ownerID(ref) === oppID) {
+                  oppNear = true;
+                  break;
+                }
+              } catch (e) {}
+            }
+            if (oppNear) break;
+          }
+        }
+
+        if (!oppNear) continue;
+
+        let hCount = 0, vCount = 0;
+        for (let d = -8; d <= 8; d++) {
+          try {
+            const hr = typeof game.ref === "function" ? game.ref(tx + d, ty) : null;
+            if (hr != null && game.ownerID(hr) === myID) hCount++;
+            const vr = typeof game.ref === "function" ? game.ref(tx, ty + d) : null;
+            if (vr != null && game.ownerID(vr) === myID) vCount++;
+          } catch (e) {}
+        }
+        const thickness = Math.min(hCount, vCount);
+        if (thickness >= 1 && thickness <= 3) {
+          let unownedAdj = null;
+          forEachNeighbor(game, tile, (n) => {
+            try {
+              const o = game.ownerID(n);
+              if (o === 0 || o === null || o === undefined) {
+                unownedAdj = n;
+              }
+            } catch (e) {}
+          });
+          if (unownedAdj != null) {
+            return { neckTile: tile, unownedAdj, thickness };
+          }
+        }
+      }
+      return null;
     }
 
     function getGamePhase(game) {
@@ -1546,6 +1656,16 @@
           }
         }
 
+        const neck = findOurVulnerableNecks(game, myPlayer, opponent);
+        if (neck && troopRatio >= 0.35 && (now - this.lastExpandMs >= 150)) {
+          const ok = sendPacket({ type: "attack", targetID: null, troops: Math.min(myTroops * 0.15, 10000) });
+          if (ok) {
+            this.lastExpandMs = now;
+            this.stats.attacksSent++;
+            this.targetDetail = `Thicken Neck #${neck.neckTile}`;
+          }
+        }
+
         if (botCfg.autoBoat && phase !== "late" && !hasBoatInFlight && (now - this.lastBoatFlankTime > 5000) && troopRatio >= 0.25) {
           const oppDir = OppTracker.oppExpansionDir;
           if (oppDir && OppTracker.territoryRatio < 0.52) {
@@ -1596,6 +1716,27 @@
         if (botCfg.autoAttack && borderingBots.length > 0) {
           const botReserve = phase === "early" ? 0.35 : 0.42;
           if (troopRatio >= botReserve) {
+            let encirclePlan = null;
+            for (const bot of borderingBots) {
+              const plan = findBotEncirclementPlan(game, myPlayer, bot);
+              if (plan && plan.walledRatio >= 0.25 && plan.unownedCount > 0 && plan.unownedCount <= 25) {
+                encirclePlan = plan;
+                break;
+              }
+            }
+
+            if (encirclePlan && botCfg.autoBoat && !hasBoatInFlight && encirclePlan.bestShoreBehind != null && (now - this.lastBoatFlankTime > 3000)) {
+              const boatTroops = Math.max(100, Math.floor(myTroops * 0.05));
+              const ok = sendPacket({ type: "boat", dst: encirclePlan.bestShoreBehind, troops: boatTroops });
+              if (ok) {
+                this.lastBoatFlankTime = now;
+                this.stats.boatsSent++;
+                this.stats.troopsSentTotal += boatTroops;
+                this.targetDetail = `Encircle Bot Boat #${encirclePlan.bestShoreBehind}`;
+                return;
+              }
+            }
+
             if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, botReserve)) {
               this.targetDetail = "Annex Bots";
               return;
@@ -1904,6 +2045,11 @@
           const aStr = playerOwnsStructures(a);
           const bStr = playerOwnsStructures(b);
           if (aStr !== bStr) return aStr ? -1 : 1;
+          const aPlan = findBotEncirclementPlan(game, myPlayer, a);
+          const bPlan = findBotEncirclementPlan(game, myPlayer, b);
+          const aW = aPlan ? aPlan.walledRatio : 0;
+          const bW = bPlan ? bPlan.walledRatio : 0;
+          if (Math.abs(aW - bW) > 0.15) return bW - aW;
           const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
           const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
           const aTr = playerTroops(a);
@@ -2364,7 +2510,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.6.0",
+      version: "3.7.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
