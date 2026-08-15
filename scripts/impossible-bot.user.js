@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.9.2
+// @version      4.0.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -47,6 +47,7 @@
         autoBuild: true,
         autoNuke: true,
         autoSpawn: true,
+        usePredeterminedSpawns: true,
         autoEmbargo: true,
         autoDonate: false,
         autoBoat: true,
@@ -80,6 +81,7 @@
         autoBuild: true,
         autoNuke: true,
         autoSpawn: true,
+        usePredeterminedSpawns: true,
         autoEmbargo: true,
         autoDonate: true,
         autoBoat: true,
@@ -98,6 +100,7 @@
       autoBuild: true,
       autoNuke: true,
       autoSpawn: true,
+      usePredeterminedSpawns: true,
       autoEmbargo: true,
       autoDonate: false,
       autoEmoji: false,
@@ -169,6 +172,7 @@
       setCb("blon-ext-feat-expand", botCfg.autoExpand);
       setCb("blon-ext-feat-defend", botCfg.autoDefend);
       setCb("blon-ext-feat-spawn", botCfg.autoSpawn);
+      setCb("blon-ext-feat-pred-spawn", botCfg.usePredeterminedSpawns);
       setCb("blon-ext-feat-embargo", botCfg.autoEmbargo);
       setCb("blon-ext-feat-boat", botCfg.autoBoat);
       setCb("blon-ext-feat-emoji", botCfg.autoEmoji);
@@ -1375,6 +1379,61 @@
       pickSpawnTile(game) {
         const w = typeof game.width === "function" ? game.width() : 500;
         const h = typeof game.height === "function" ? game.height() : 500;
+
+        if (botCfg.usePredeterminedSpawns !== false) {
+          let mapName = "";
+          try {
+            if (typeof game.mapName === "function") mapName = String(game.mapName() || "");
+            if (!mapName && typeof game.config === "function") {
+              const c = game.config();
+              if (c) mapName = String(c.gameMap || c.mapName || "");
+            }
+            if (!mapName && typeof game.name === "function") mapName = String(game.name() || "");
+          } catch (e) {}
+          mapName = mapName.toLowerCase();
+
+          let targetTile = null;
+          if (mapName.includes("iceland")) {
+            targetTile = (w === 2000 || h === 1500) ? 1057436 : 282658;
+          } else if (mapName.includes("australia")) {
+            targetTile = (w === 2000 || h === 1500) ? 1351364 : 127944;
+          } else if (mapName.includes("asia") && !mapName.includes("east")) {
+            targetTile = (w === 2000 || h === 1200) ? 674828 : 191368;
+          } else if (mapName.includes("europe")) {
+            targetTile = (w === 2000 || h >= 1000) ? 823506 : 167789;
+          } else if (w === 2000 && h === 1500) {
+            targetTile = 1351364;
+          } else if (w === 1000 && h === 750) {
+            targetTile = 127944;
+          } else if (w === 2000 && h === 1200) {
+            targetTile = 674828;
+          } else if (w === 1000 && h === 600) {
+            targetTile = 191368;
+          } else if ((w === 2000 && h === 1000) || (w === 2000 && h === 1396)) {
+            targetTile = 823506;
+          } else if ((w === 1000 && h === 500) || (w === 1000 && h === 698)) {
+            targetTile = 167789;
+          }
+
+          if (targetTile != null && targetTile >= 0) {
+            try {
+              if (typeof game.isValidCoord === "function") {
+                const tx = targetTile % w;
+                const ty = Math.floor(targetTile / w);
+                if (game.isValidCoord(tx, ty)) {
+                  if (typeof game.hasOwner !== "function" || !game.hasOwner(targetTile)) {
+                    return targetTile;
+                  }
+                }
+              } else {
+                return targetTile;
+              }
+            } catch (e) {
+              return targetTile;
+            }
+          }
+        }
+
         const cx = w / 2, cy = h / 2;
         let bestTile = null;
         let bestScore = -Infinity;
@@ -2338,6 +2397,9 @@
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
             <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Spawn (Optimal Inland)
         </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;margin-left:14px;">
+            <input type="checkbox" id="blon-ext-feat-pred-spawn" ${botCfg.usePredeterminedSpawns !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Use Predetermined 1v1 Spawns
+        </label>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
             <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Boat Awareness & Naval Flanking
         </label>
@@ -2458,6 +2520,7 @@
         ["blon-ext-feat-expand", "autoExpand"],
         ["blon-ext-feat-defend", "autoDefend"],
         ["blon-ext-feat-spawn", "autoSpawn"],
+        ["blon-ext-feat-pred-spawn", "usePredeterminedSpawns"],
         ["blon-ext-feat-embargo", "autoEmbargo"],
         ["blon-ext-feat-boat", "autoBoat"],
         ["blon-ext-feat-emoji", "autoEmoji"],
@@ -2535,7 +2598,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.9.2",
+      version: "4.0.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
