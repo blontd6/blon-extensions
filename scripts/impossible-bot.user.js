@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.5.0
+// @version      3.6.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -777,6 +777,7 @@
     }
 
     function getDynamicReserve(game, myPlayer, opponent, phase) {
+      if (phase === "early") return 0.35;
       if (opponent) {
         const oppUnits = playerUnits(opponent);
         if (oppUnits.some(u => unitType(u) === "Missile Silo")) return 0.40;
@@ -1138,7 +1139,7 @@
           this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
             const maxTr = getMaxTroops(game, myPlayer);
-            const burstTroops = Math.floor(Math.max(0, playerTroops(myPlayer) - maxTr * 0.42));
+            const burstTroops = Math.floor(Math.max(0, playerTroops(myPlayer) - maxTr * 0.35));
             if (burstTroops >= 1) {
               if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
@@ -1521,7 +1522,7 @@
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
           const expandInterval = phase === "early" ? 200 : 350;
           if (now - this.lastExpandMs >= expandInterval) {
-            const expandReserve = maxTroops * (botCfg.expandRatio ?? 0.42);
+            const expandReserve = maxTroops * (phase === "early" ? 0.35 : (botCfg.expandRatio ?? 0.42));
             const available = myTroops - expandReserve;
             if (available > 0) {
               let parityExpandMod = 1.0;
@@ -1593,7 +1594,7 @@
         }
 
         if (botCfg.autoAttack && borderingBots.length > 0) {
-          const botReserve = 0.42;
+          const botReserve = phase === "early" ? 0.35 : 0.42;
           if (troopRatio >= botReserve) {
             if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, botReserve)) {
               this.targetDetail = "Annex Bots";
@@ -2363,7 +2364,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.5.0",
+      version: "3.6.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
