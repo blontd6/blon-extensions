@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.8.0
+// @version      3.9.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -2057,15 +2057,22 @@
           const aStr = playerOwnsStructures(a);
           const bStr = playerOwnsStructures(b);
           if (aStr !== bStr) return aStr ? -1 : 1;
+
           const aPlan = findBotEncirclementPlan(game, myPlayer, a);
           const bPlan = findBotEncirclementPlan(game, myPlayer, b);
           const aW = aPlan ? aPlan.walledRatio : 0;
           const bW = bPlan ? bPlan.walledRatio : 0;
-          if (Math.abs(aW - bW) > 0.15) return bW - aW;
-          const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
-          const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
+
+          if ((aW >= 0.60) !== (bW >= 0.60)) return aW >= 0.60 ? -1 : 1;
+
           const aTr = playerTroops(a);
           const bTr = playerTroops(b);
+          const aOneShot = aTr < myTroops * 0.15;
+          const bOneShot = bTr < myTroops * 0.15;
+          if (aOneShot !== bOneShot) return aOneShot ? -1 : 1;
+
+          const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
+          const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
           return (aTr / aTiles) - (bTr / bTiles);
         });
 
@@ -2522,7 +2529,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.8.0",
+      version: "3.9.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
