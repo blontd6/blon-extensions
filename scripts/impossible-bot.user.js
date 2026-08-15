@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.4.0
+// @version      3.5.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -39,7 +39,7 @@
         allowHydrogenBombs: true, 
         triggerRatio: 0.46,
         reserveRatio: 0.42,
-        expandRatio: 0.05,
+        expandRatio: 0.42,
         botParallelism: 80,
         autoAttack: true,
         autoExpand: true,
@@ -120,8 +120,8 @@
       maxDefensePosts: 4,
 
       triggerRatio: 0.50,
-      reserveRatio: 0.30,
-      expandRatio: 0.10,
+      reserveRatio: 0.42,
+      expandRatio: 0.42,
       botParallelism: 60,
       tickIntervalMs: 650,
       hotkey: "b"
@@ -777,7 +777,6 @@
     }
 
     function getDynamicReserve(game, myPlayer, opponent, phase) {
-      if (phase === "early") return 0.08;
       if (opponent) {
         const oppUnits = playerUnits(opponent);
         if (oppUnits.some(u => unitType(u) === "Missile Silo")) return 0.40;
@@ -785,7 +784,6 @@
         const myTr = playerTroops(myPlayer);
         if (oppTr < myTr * 0.25) return 0.10;
       }
-      if (phase === "mid") return 0.40;
       return 0.42;
     }
 
@@ -1139,7 +1137,8 @@
         if (!this.behaviorsInitialized) {
           this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
-            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.70);
+            const maxTr = getMaxTroops(game, myPlayer);
+            const burstTroops = Math.floor(Math.max(0, playerTroops(myPlayer) - maxTr * 0.42));
             if (burstTroops >= 1) {
               if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
@@ -1520,19 +1519,18 @@
         }
 
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const expandInterval = phase === "early" ? 150 : 350;
+          const expandInterval = phase === "early" ? 200 : 350;
           if (now - this.lastExpandMs >= expandInterval) {
-            const expandReserve = maxTroops * (phase === "early" ? 0.08 : botCfg.expandRatio ?? 0.08);
+            const expandReserve = maxTroops * (botCfg.expandRatio ?? 0.42);
             const available = myTroops - expandReserve;
             if (available > 0) {
               let parityExpandMod = 1.0;
               if (OppTracker.territoryRatio < 0.45) {
-                parityExpandMod = 1.5;
+                parityExpandMod = 1.3;
               } else if (OppTracker.territoryRatio > 0.55) {
-                parityExpandMod = 0.6;
+                parityExpandMod = 0.7;
               }
-              const expandPercent = (phase === "early" ? 0.18 : 0.08) * parityExpandMod;
-              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * expandPercent)));
+              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.02, available * 0.50 * parityExpandMod)));
               if (troopsToSend >= 1) {
                 const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
                 if (ok) {
@@ -1595,7 +1593,7 @@
         }
 
         if (botCfg.autoAttack && borderingBots.length > 0) {
-          const botReserve = 0.05;
+          const botReserve = 0.42;
           if (troopRatio >= botReserve) {
             if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, botReserve)) {
               this.targetDetail = "Annex Bots";
@@ -1912,7 +1910,7 @@
           return (aTr / aTiles) - (bTr / bTiles);
         });
 
-        const reserve = maxTroops * Math.min(reserveRatio, 0.06);
+        const reserve = maxTroops * (reserveRatio ?? 0.42);
         let availableBudget = Math.max(0, myTroops - reserve - this.botAttackTroopsSent);
         if (availableBudget < 1) return false;
 
@@ -2252,13 +2250,13 @@
             </div>
             <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
                 <span style="min-width:130px;font-size:10px;">Troop Reserve Floor</span>
-                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? 0.30) * 100)}" style="flex:1;cursor:pointer;">
-                <span id="blon-ext-reserve-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.reserveRatio ?? 0.30) * 100)}%</span>
+                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? 0.42) * 100)}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-reserve-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.reserveRatio ?? 0.42) * 100)}%</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
                 <span style="min-width:130px;font-size:10px;">Wilderness Expand Floor</span>
-                <input id="blon-ext-expand-slider" type="range" min="5" max="40" step="1" value="${Math.round((botCfg.expandRatio ?? 0.10) * 100)}" style="flex:1;cursor:pointer;">
-                <span id="blon-ext-expand-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.expandRatio ?? 0.10) * 100)}%</span>
+                <input id="blon-ext-expand-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.expandRatio ?? 0.42) * 100)}" style="flex:1;cursor:pointer;">
+                <span id="blon-ext-expand-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.expandRatio ?? 0.42) * 100)}%</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">
                 <span style="min-width:130px;font-size:10px;">Bot Parallel Cap</span>
@@ -2365,7 +2363,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.4.0",
+      version: "3.5.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
