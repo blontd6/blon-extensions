@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      4.1.0
+// @version      4.2.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -37,9 +37,9 @@
         buildDefensePosts: true,
         allowAtomBombs: false, 
         allowHydrogenBombs: true, 
-        triggerRatio: 0.46,
+        triggerRatio: 0.41,
         reserveRatio: 0.42,
-        expandRatio: 0.42,
+        expandRatio: 0.38,
         botParallelism: 80,
         autoAttack: true,
         autoExpand: true,
@@ -2598,7 +2598,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.1.0",
+      version: "4.2.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
