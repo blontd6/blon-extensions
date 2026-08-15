@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.7.0
+// @version      3.8.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -660,23 +660,27 @@
       if (!oppID) return null;
       const w = typeof game.width === "function" ? game.width() : 500;
       const oppBts = Array.from(getBorderTiles(game, opponent));
-      if (oppBts.length < 30) return null;
+      if (oppBts.length < 25) return null;
       let bestTile = null, bestScore = Infinity;
       const stp = Math.max(1, Math.floor(oppBts.length / 30));
       for (let i = 0; i < oppBts.length; i += stp) {
         const tile = oppBts[i];
         const tx = tile % w, ty = Math.floor(tile / w);
-        let hCount = 0, vCount = 0;
-        for (let d = -6; d <= 6; d++) {
+        let hCount = 0, vCount = 0, d1Count = 0, d2Count = 0;
+        for (let d = -20; d <= 20; d++) {
           try {
             const hr = typeof game.ref === "function" ? game.ref(tx + d, ty) : null;
             if (hr != null && game.ownerID(hr) === oppID) hCount++;
             const vr = typeof game.ref === "function" ? game.ref(tx, ty + d) : null;
             if (vr != null && game.ownerID(vr) === oppID) vCount++;
+            const dr1 = typeof game.ref === "function" ? game.ref(tx + d, ty + d) : null;
+            if (dr1 != null && game.ownerID(dr1) === oppID) d1Count++;
+            const dr2 = typeof game.ref === "function" ? game.ref(tx + d, ty - d) : null;
+            if (dr2 != null && game.ownerID(dr2) === oppID) d2Count++;
           } catch (e) {}
         }
-        const narrowness = Math.min(hCount, vCount);
-        if (narrowness < bestScore && narrowness >= 1 && narrowness <= 5) {
+        const narrowness = Math.min(hCount, vCount, d1Count, d2Count);
+        if (narrowness < bestScore && narrowness >= 1 && narrowness <= 16) {
           bestScore = narrowness;
           bestTile = tile;
         }
@@ -692,7 +696,7 @@
       const w = typeof game.width === "function" ? game.width() : 500;
       const h = typeof game.height === "function" ? game.height() : 500;
       const oppBts = Array.from(getBorderTiles(game, opponent));
-      if (oppBts.length < 40) return null;
+      if (oppBts.length < 30) return null;
       
       const attackSurface = [];
       const myBts = getBorderTiles(game, myPlayer);
@@ -720,24 +724,28 @@
         if (oppTile === null) continue;
         
         const ox = oppTile % w, oy = Math.floor(oppTile / w);
-        let hCount = 0, vCount = 0;
-        for (let d = -10; d <= 10; d++) {
+        let hCount = 0, vCount = 0, d1Count = 0, d2Count = 0;
+        for (let d = -24; d <= 24; d++) {
           try {
             const hr = typeof game.ref === "function" ? game.ref(ox + d, oy) : null;
             if (hr != null && game.ownerID(hr) === oppID) hCount++;
             const vr = typeof game.ref === "function" ? game.ref(ox, oy + d) : null;
             if (vr != null && game.ownerID(vr) === oppID) vCount++;
+            const dr1 = typeof game.ref === "function" ? game.ref(ox + d, oy + d) : null;
+            if (dr1 != null && game.ownerID(dr1) === oppID) d1Count++;
+            const dr2 = typeof game.ref === "function" ? game.ref(ox + d, oy - d) : null;
+            if (dr2 != null && game.ownerID(dr2) === oppID) d2Count++;
           } catch(e) {}
         }
-        const narrowness = Math.min(hCount, vCount);
-        if (narrowness < 1 || narrowness > 6) continue;
+        const narrowness = Math.min(hCount, vCount, d1Count, d2Count);
+        if (narrowness < 1 || narrowness > 18) continue;
         
         const isHorizontalCut = hCount < vCount;
         const visited = new Set();
         const queue = [oppTile];
         visited.add(oppTile);
         let pocketCount = 0;
-        const maxBFS = 200;
+        const maxBFS = 500;
         
         while (queue.length > 0 && pocketCount < maxBFS) {
           const current = queue.shift();
@@ -824,17 +832,17 @@
       if (!myID) return null;
       const w = typeof game.width === "function" ? game.width() : 500;
       const myBts = Array.from(getBorderTiles(game, myPlayer));
-      if (myBts.length < 20) return null;
+      if (myBts.length < 15) return null;
 
-      const step = Math.max(1, Math.floor(myBts.length / 25));
+      const step = Math.max(1, Math.floor(myBts.length / 30));
       for (let i = 0; i < myBts.length; i += step) {
         const tile = myBts[i];
         const tx = tile % w, ty = Math.floor(tile / w);
 
         let oppNear = false;
         if (oppID) {
-          for (let dx = -15; dx <= 15; dx += 3) {
-            for (let dy = -15; dy <= 15; dy += 3) {
+          for (let dx = -35; dx <= 35; dx += 4) {
+            for (let dy = -35; dy <= 35; dy += 4) {
               try {
                 const ref = typeof game.ref === "function" ? game.ref(tx + dx, ty + dy) : null;
                 if (ref != null && game.ownerID(ref) === oppID) {
@@ -849,17 +857,21 @@
 
         if (!oppNear) continue;
 
-        let hCount = 0, vCount = 0;
-        for (let d = -8; d <= 8; d++) {
+        let hCount = 0, vCount = 0, d1Count = 0, d2Count = 0;
+        for (let d = -20; d <= 20; d++) {
           try {
             const hr = typeof game.ref === "function" ? game.ref(tx + d, ty) : null;
             if (hr != null && game.ownerID(hr) === myID) hCount++;
             const vr = typeof game.ref === "function" ? game.ref(tx, ty + d) : null;
             if (vr != null && game.ownerID(vr) === myID) vCount++;
+            const dr1 = typeof game.ref === "function" ? game.ref(tx + d, ty + d) : null;
+            if (dr1 != null && game.ownerID(dr1) === myID) d1Count++;
+            const dr2 = typeof game.ref === "function" ? game.ref(tx + d, ty - d) : null;
+            if (dr2 != null && game.ownerID(dr2) === myID) d2Count++;
           } catch (e) {}
         }
-        const thickness = Math.min(hCount, vCount);
-        if (thickness >= 1 && thickness <= 3) {
+        const thickness = Math.min(hCount, vCount, d1Count, d2Count);
+        if (thickness >= 1 && thickness <= 16) {
           let unownedAdj = null;
           forEachNeighbor(game, tile, (n) => {
             try {
@@ -2510,7 +2522,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.7.0",
+      version: "3.8.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
