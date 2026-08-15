@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.3.0
+// @version      3.4.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -639,22 +639,19 @@
         if (adj) sharedBorder.push(tile);
       }
       if (sharedBorder.length === 0) return false;
-      let coveredCount = 0;
-      const sampleStep = Math.max(1, Math.floor(sharedBorder.length / 15));
-      let sampledCount = 0;
+      const sampleStep = Math.max(1, Math.floor(sharedBorder.length / 25));
       for (let i = 0; i < sharedBorder.length; i += sampleStep) {
         const tile = sharedBorder[i];
         const tx = tile % w, ty = Math.floor(tile / w);
-        sampledCount++;
         for (const dp of oppDPs) {
           const dpTile = typeof dp.tile === "function" ? dp.tile() : dp.tile;
           if (dpTile == null) continue;
           const dpx = dpTile % w, dpy = Math.floor(dpTile / w);
           const dist = Math.hypot(tx - dpx, ty - dpy);
-          if (dist <= 30) { coveredCount++; break; }
+          if (dist <= 35) return true;
         }
       }
-      return sampledCount > 0 && (coveredCount / sampledCount) > 0.5;
+      return false;
     }
 
     function findCutTarget(game, opponent) {
@@ -1486,28 +1483,6 @@
         const myID = getMySmallID(myPlayer);
         const myBts = getBorderTiles(game, myPlayer);
 
-        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
-        if (incoming.length > 0 && botCfg.autoDefend) {
-          let bestAtk = null, bestTr = 0;
-          for (const atk of incoming) {
-            if (!atk) continue;
-            const attacker = typeof atk.attacker === "function" ? atk.attacker() : null;
-            if (!attacker || isFriendly(myPlayer, attacker)) continue;
-            const tr = typeof atk.troops === "function" ? Number(atk.troops()) : Number(atk.troops || 0);
-            if (tr > bestTr) { bestTr = tr; bestAtk = attacker; }
-          }
-          if (bestAtk) {
-            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, false);
-            if (ok) {
-              this.lastAttackMs = now;
-              this.stats.attacksSent++;
-              this.targetDetail = `Defend vs ${getPlayerName(bestAtk)}`;
-              if (botCfg.autoEmoji === true) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
-              return;
-            }
-          }
-        }
-
         const borderingMap = getBorderingPlayerIDs(game, myPlayer);
         const borderingEnemies = Array.from(borderingMap.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
         const borderingBots = borderingEnemies.filter(p => isBot(p));
@@ -1619,9 +1594,17 @@
           }
         }
 
-        if (botCfg.autoAttack && borderingBots.length > 0 && troopRatio >= (phase === "early" ? 0.10 : dynamicReserve)) {
-          if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, dynamicReserve)) {
-            this.targetDetail = "Annex Bots";
+        if (botCfg.autoAttack && borderingBots.length > 0) {
+          const botReserve = 0.05;
+          if (troopRatio >= botReserve) {
+            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, botReserve)) {
+              this.targetDetail = "Annex Bots";
+              return;
+            }
+          }
+          const oppTr = opponent ? playerTroops(opponent) : Infinity;
+          const isOppKillShot = oppTr < myTroops * 0.28 || oppTr < maxTroops * 0.08;
+          if (!isOppKillShot) {
             return;
           }
         }
@@ -1633,9 +1616,10 @@
         const oppHasDP = oppUnits.some(u => unitType(u) === "Defense Post");
         const isKillShot = oppTroops < myTroops * 0.28 || oppTroops < maxTroops * 0.08;
         const isPunish = OppTracker.isPunishWindow;
+        const oppInDPRange = frontlineInDPRange(game, myPlayer, opponent);
 
         if (this.justLandedBeachhead || (now - this.lastLandingAssaultTime < 2500)) {
-          if (isOpponentBordering && (now - this.lastAttackMs >= 300)) {
+          if (isOpponentBordering && (now - this.lastAttackMs >= 300) && (!oppInDPRange || isKillShot)) {
             const ok = sendLandAttack(game, myPlayer, opponent, myTroops, maxTroops, this.botAttackTroopsSent, dynamicReserve, true);
             if (ok) {
               this.lastAttackMs = now;
@@ -1665,7 +1649,7 @@
           }
         }
 
-        if (now - this.lastCutAttackTime > 3000 && troopRatio >= dynamicReserve) {
+        if (now - this.lastCutAttackTime > 3000 && troopRatio >= dynamicReserve && !oppInDPRange) {
           const encircle = findEncirclementTarget(game, myPlayer, opponent);
           if (encircle && encircle.pocketSize > 30) {
             const cutTroops = Math.floor(Math.min(myTroops * 0.30, maxTroops * 0.25));
@@ -1710,8 +1694,6 @@
           }
         }
 
-        const oppInDPRange = frontlineInDPRange(game, myPlayer, opponent);
-
         if (isOpponentBordering && (now - this.lastAttackMs >= 500)) {
           const hasAdvantage = myTroops > oppTroops * 1.10 && troopRatio >= Math.max(0.55, botCfg.triggerRatio ?? 0.46);
           const latePhasePush = phase === "late" && myTroops > oppTroops * 0.95 && troopRatio >= 0.44;
@@ -1731,11 +1713,11 @@
                       this.stats.boatsSent++;
                       this.stats.troopsSentTotal += boatTroops;
                       this.targetDetail = `DP Bypass Flank #${flankTile}`;
-                      return;
                     }
                   }
                 }
               }
+              return;
             }
           }
 
@@ -1803,27 +1785,6 @@
         const borderingPlayers = Array.from(borderingMap.values()).filter(p => isAlive(p));
         const borderingEnemies = borderingPlayers.filter(p => !isFriendly(myPlayer, p));
         borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
-
-        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
-        if (incoming.length > 0 && botCfg.autoDefend) {
-          let bestAtk = null, bestTr = 0;
-          for (const atk of incoming) {
-            if (!atk) continue;
-            const attacker = typeof atk.attacker === "function" ? atk.attacker() : null;
-            if (!attacker || isFriendly(myPlayer, attacker)) continue;
-            const tr = typeof atk.troops === "function" ? Number(atk.troops()) : Number(atk.troops || 0);
-            if (tr > bestTr) { bestTr = tr; bestAtk = attacker; }
-          }
-          if (bestAtk) {
-            const ok = sendLandAttack(game, myPlayer, bestAtk, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
-            if (ok) {
-              this.lastAttackMs = Date.now();
-              this.stats.attacksSent++;
-              if (botCfg.autoEmoji === true) this.sendEmojiTo(bestAtk, EMOJI_IDX.ANGRY);
-              return;
-            }
-          }
-        }
 
         if (botCfg.autoAttack) {
           const borderingBotsWithStructs = borderingEnemies.filter(p => isBot(p) && playerOwnsStructures(p));
@@ -1951,8 +1912,7 @@
           return (aTr / aTiles) - (bTr / bTiles);
         });
 
-        const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
-        const reserve = maxTroops * effReserve;
+        const reserve = maxTroops * Math.min(reserveRatio, 0.06);
         let availableBudget = Math.max(0, myTroops - reserve - this.botAttackTroopsSent);
         if (availableBudget < 1) return false;
 
@@ -2405,7 +2365,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.3.0",
+      version: "3.4.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
