@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.9.1
+// @version      3.9.2
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -787,6 +787,7 @@
       let myBorderCount = 0;
       let totalBorderChecks = 0;
       const unownedPerimeter = new Set();
+      const neighboringEnemyTribes = new Set();
       let bestShoreBehind = null;
       let maxDistFromMe = 0;
       const myCenter = getPlayerCenter(game, myPlayer);
@@ -808,17 +809,22 @@
                   bestShoreBehind = n;
                 }
               }
+            } else if (owner !== botID) {
+              neighboringEnemyTribes.add(owner);
             }
           } catch (e) {}
         });
       }
 
       const walledRatio = myBorderCount / Math.max(1, totalBorderChecks);
+      const botKillsNeeded = neighboringEnemyTribes.size;
       return {
         bot,
         botID,
         botTiles: typeof bot.numTilesOwned === "function" ? Number(bot.numTilesOwned()) || 1 : 1,
         walledRatio,
+        botKillsNeeded,
+        neighboringTribeIDs: Array.from(neighboringEnemyTribes),
         unownedCount: unownedPerimeter.size,
         unownedPerimeter: Array.from(unownedPerimeter),
         bestShoreBehind
@@ -2056,21 +2062,21 @@
         bots.sort((a, b) => {
           const aPlan = findBotEncirclementPlan(game, myPlayer, a);
           const bPlan = findBotEncirclementPlan(game, myPlayer, b);
+
+          const aKills = aPlan ? aPlan.botKillsNeeded : 99;
+          const bKills = bPlan ? bPlan.botKillsNeeded : 99;
+          if (aKills !== bKills) return aKills - bKills;
+
           const aW = aPlan ? aPlan.walledRatio : 0;
           const bW = bPlan ? bPlan.walledRatio : 0;
+          if (Math.abs(aW - bW) > 0.10) return bW - aW;
 
-          if ((aW >= 0.60) !== (bW >= 0.60)) return aW >= 0.60 ? -1 : 1;
-
-          const aStr = playerOwnsStructures(a);
-          const bStr = playerOwnsStructures(b);
-          if (aStr !== bStr) return aStr ? -1 : 1;
+          const aGap = aPlan ? aPlan.unownedCount : 999;
+          const bGap = bPlan ? bPlan.unownedCount : 999;
+          if (aGap !== bGap) return aGap - bGap;
 
           const aTr = playerTroops(a);
           const bTr = playerTroops(b);
-          const aOneShot = aTr < myTroops * 0.15;
-          const bOneShot = bTr < myTroops * 0.15;
-          if (aOneShot !== bOneShot) return aOneShot ? -1 : 1;
-
           const aTiles = typeof a.numTilesOwned === "function" ? Number(a.numTilesOwned()) || 1 : 1;
           const bTiles = typeof b.numTilesOwned === "function" ? Number(b.numTilesOwned()) || 1 : 1;
           return (aTr / aTiles) - (bTr / bTiles);
@@ -2529,7 +2535,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.9.1",
+      version: "3.9.2",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
