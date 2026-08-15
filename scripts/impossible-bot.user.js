@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0
+// @version      4.1.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -1796,7 +1796,7 @@
             let encirclePlan = null;
             for (const bot of borderingBots) {
               const plan = findBotEncirclementPlan(game, myPlayer, bot);
-              if (plan && plan.walledRatio >= 0.25 && plan.unownedCount > 0 && plan.unownedCount <= 25) {
+              if (plan && plan.walledRatio >= 0.20 && plan.unownedCount > 0 && plan.unownedCount <= 100) {
                 encirclePlan = plan;
                 break;
               }
@@ -2598,7 +2598,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.0.0",
+      version: "4.1.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
