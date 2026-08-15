@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.2.0
+// @version      3.3.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -1142,7 +1142,7 @@
         if (!this.behaviorsInitialized) {
           this.behaviorsInitialized = true;
           if (botCfg.autoExpand) {
-            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.50);
+            const burstTroops = Math.floor(playerTroops(myPlayer) * 0.70);
             if (burstTroops >= 1) {
               if (sendPacket({ type: "attack", targetID: null, troops: burstTroops })) {
                 this.stats.expandsDone++;
@@ -1545,9 +1545,9 @@
         }
 
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const expandInterval = phase === "early" ? 250 : 350;
+          const expandInterval = phase === "early" ? 150 : 350;
           if (now - this.lastExpandMs >= expandInterval) {
-            const expandReserve = maxTroops * (phase === "early" ? 0.15 : botCfg.expandRatio ?? 0.08);
+            const expandReserve = maxTroops * (phase === "early" ? 0.08 : botCfg.expandRatio ?? 0.08);
             const available = myTroops - expandReserve;
             if (available > 0) {
               let parityExpandMod = 1.0;
@@ -1556,7 +1556,7 @@
               } else if (OppTracker.territoryRatio > 0.55) {
                 parityExpandMod = 0.6;
               }
-              const expandPercent = (phase === "early" ? 0.12 : 0.08) * parityExpandMod;
+              const expandPercent = (phase === "early" ? 0.18 : 0.08) * parityExpandMod;
               const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * expandPercent)));
               if (troopsToSend >= 1) {
                 const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
@@ -1566,7 +1566,6 @@
                   this.stats.expandsDone++;
                   this.stats.troopsSentTotal += troopsToSend;
                   this.targetDetail = phase === "early" ? "Early Rush Expand" : "Territory Expansion";
-                  if (phase === "early") return;
                 }
               }
             }
@@ -1834,13 +1833,13 @@
         }
 
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const expandThrottle = 2500;
+          const expandThrottle = 800;
           const now = Date.now();
           if (now - this.lastExpandMs >= expandThrottle) {
             const expandReserve = maxTroops * expandRatio;
             const available = myTroops - expandReserve;
             if (available > 0) {
-              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * 0.20)));
+              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * 0.30)));
               if (troopsToSend >= Math.max(1, maxTroops * 0.02)) {
                 const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
                 if (ok) {
@@ -1955,14 +1954,14 @@
         const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
         const reserve = maxTroops * effReserve;
         let availableBudget = Math.max(0, myTroops - reserve - this.botAttackTroopsSent);
-        if (availableBudget < 10) return false;
+        if (availableBudget < 1) return false;
 
         for (const bot of bots.slice(0, cap)) {
           if (availableBudget <= 0) break;
           const botId = typeof bot.id === "function" ? bot.id() : bot.id;
           const botTr = playerTroops(bot);
           const botTiles = typeof bot.numTilesOwned === "function" ? Number(bot.numTilesOwned()) || 1 : 1;
-          const needed = Math.ceil(botTr * 1.25 + botTiles * 1.2 + 50);
+          const needed = Math.ceil(botTr * 1.25 + botTiles * 2.5 + 50);
 
           let sendAmt = 0;
           if (availableBudget >= needed) {
@@ -2406,7 +2405,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "3.2.0",
+      version: "3.3.0",
       description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
