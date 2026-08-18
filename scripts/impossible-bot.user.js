@@ -2153,109 +2153,139 @@
         pickSpawnTile(game, myPlayer) {
           try {
             if (!game) return null;
-            const width = typeof game.width === "function" ? game.width() : game.width || 500;
-            const height = typeof game.height === "function" ? game.height() : game.height || 500;
-            let area = null;
+            const t = game;
+            const n = typeof t.width === "function" ? t.width() : t.width || 500;
+            const o = typeof t.height === "function" ? t.height() : t.height || 500;
+            let r = 30;
             try {
-              if (myPlayer && typeof myPlayer.team === "function" && typeof game.teamSpawnArea === "function") {
-                const team = myPlayer.team();
-                if (team !== null && team !== undefined) {
-                  area = game.teamSpawnArea(team);
+              const p = typeof t.config === "function" ? t.config()?.minDistanceBetweenPlayers?.() : 30;
+              if (Number.isFinite(p)) r = p;
+            } catch (p) {}
+            let a = null;
+            try {
+              const team = myPlayer && typeof myPlayer.team === "function" ? myPlayer.team() : myPlayer?.team ?? null;
+              if (team !== null && team !== undefined) {
+                if (typeof t.teamSpawnArea === "function") {
+                  a = t.teamSpawnArea(team) ?? null;
+                } else if (typeof t.__src?.teamSpawnArea === "function") {
+                  a = t.__src.teamSpawnArea(team) ?? null;
                 }
               }
-            } catch (e) {}
-            const minX = area ? Math.max(10, area.x) : 15;
-            const maxX = area ? Math.min(width - 10, area.x + area.width) : width - 15;
-            const minY = area ? Math.max(10, area.y) : 15;
-            const maxY = area ? Math.min(height - 10, area.y + area.height) : height - 15;
-            const spanX = Math.max(1, maxX - minX);
-            const spanY = Math.max(1, maxY - minY);
+            } catch (p) {}
+            const allPlayers = getAllPlayers(t);
             const myID = getMySmallID(myPlayer);
-            const allPlayers = getAllPlayers(game);
-            const spawnedCoords = [];
-            let minPlayerDist = 25;
-            try {
-              if (typeof game.config === "function" && typeof game.config()?.minDistanceBetweenPlayers === "function") {
-                minPlayerDist = game.config().minDistanceBetweenPlayers() || 25;
-              }
-            } catch (e) {}
-            for (const p of allPlayers) {
-              if (!p) continue;
+            const spawnedEnemies = allPlayers.filter((p => {
               try {
+                if (!p) return false;
                 const pID = getMySmallID(p);
-                if (myID != null && pID === myID) continue;
-                const st = typeof p.spawnTile === "function" ? p.spawnTile() : p.spawnTile;
-                if (st != null && typeof st === "number" && st >= 0) {
-                  const sx = typeof game.x === "function" ? game.x(st) : st % width;
-                  const sy = typeof game.y === "function" ? game.y(st) : Math.floor(st / width);
-                  if (Number.isFinite(sx) && Number.isFinite(sy)) {
-                    spawnedCoords.push({
-                      x: sx,
-                      y: sy
-                    });
-                  }
+                if (myID != null && pID === myID) return false;
+                if (isFriendly(myPlayer, p)) return false;
+                return typeof p.hasSpawned === "function" ? p.hasSpawned() : Boolean(p.spawnTile?.());
+              } catch (e) {
+                return false;
+              }
+            }));
+            const isTooCloseToEnemy = tile => {
+              const tx = typeof t.x === "function" ? t.x(tile) : tile % n;
+              const ty = typeof t.y === "function" ? t.y(tile) : Math.floor(tile / n);
+              for (const g of spawnedEnemies) {
+                const loc = typeof g.nameLocation === "function" ? g.nameLocation() : null;
+                const st = typeof g.spawnTile === "function" ? g.spawnTile() : g.spawnTile;
+                const gx = loc ? loc.x : st != null ? typeof t.x === "function" ? t.x(st) : st % n : null;
+                const gy = loc ? loc.y : st != null ? typeof t.y === "function" ? t.y(st) : Math.floor(st / n) : null;
+                if (gx != null && gy != null) {
+                  const dist = Math.abs(gx - tx) + Math.abs(gy - ty);
+                  if (dist < r) return true;
                 }
-              } catch (e) {}
-            }
+              }
+              return false;
+            };
+            const isCandidateValid = tile => {
+              if (tile == null) return false;
+              try {
+                if (typeof t.isValidRef === "function" && !t.isValidRef(tile)) return false;
+                if (typeof t.isLand === "function" && !t.isLand(tile)) return false;
+                if (typeof t.hasOwner === "function" && t.hasOwner(tile)) return false;
+                if (typeof t.isBorder === "function" && t.isBorder(tile)) return false;
+                if (typeof t.isImpassable === "function" && t.isImpassable(tile)) return false;
+                if (isTooCloseToEnemy(tile)) return false;
+                return true;
+              } catch (e) {
+                return false;
+              }
+            };
+            const scoreTile = tile => {
+              const tx = typeof t.x === "function" ? t.x(tile) : tile % n;
+              const ty = typeof t.y === "function" ? t.y(tile) : Math.floor(tile / n);
+              let totalScore = 0;
+              const c = 12;
+              let landCount = 0;
+              let totalChecked = 0;
+              for (let h = -c; h <= c; h += 3) {
+                for (let m = -c; m <= c; m += 3) {
+                  const gx = tx + m;
+                  const gy = ty + h;
+                  if (gx < 0 || gx >= n || gy < 0 || gy >= o) continue;
+                  if (typeof t.isValidCoord === "function" && !t.isValidCoord(gx, gy)) continue;
+                  totalChecked++;
+                  const ref = typeof t.ref === "function" ? t.ref(gx, gy) : gy * n + gx;
+                  try {
+                    if (t.isLand(ref) && !t.hasOwner(ref)) landCount++;
+                  } catch (e) {}
+                }
+              }
+              totalScore += (totalChecked > 0 ? landCount / totalChecked : 0) * 40;
+              let minEnemyDist = Infinity;
+              for (const g of spawnedEnemies) {
+                const loc = typeof g.nameLocation === "function" ? g.nameLocation() : null;
+                const st = typeof g.spawnTile === "function" ? g.spawnTile() : g.spawnTile;
+                const gx = loc ? loc.x : st != null ? typeof t.x === "function" ? t.x(st) : st % n : null;
+                const gy = loc ? loc.y : st != null ? typeof t.y === "function" ? t.y(st) : Math.floor(st / n) : null;
+                if (gx != null && gy != null) {
+                  const dist = Math.abs(gx - tx) + Math.abs(gy - ty);
+                  if (dist < minEnemyDist) minEnemyDist = dist;
+                }
+              }
+              totalScore += Math.min(1, minEnemyDist / 200) * 30;
+              const edgeDist = Math.min(tx, ty, n - 1 - tx, o - 1 - ty);
+              totalScore += Math.min(1, edgeDist / 30) * 20;
+              if (a) {
+                const cx = a.x + a.width / 2;
+                const cy = a.y + a.height / 2;
+                const distFromTeamCenter = Math.abs(tx - cx) + Math.abs(ty - cy);
+                const teamSpan = (a.width + a.height) / 2;
+                totalScore += Math.max(0, 1 - distFromTeamCenter / Math.max(1, teamSpan)) * 25;
+              }
+              return totalScore;
+            };
             let bestTile = null;
             let bestScore = -Infinity;
-            for (let i = 0; i < 60; i++) {
+            const minX = a ? Math.max(0, a.x) : 0;
+            const maxX = a ? Math.min(n, a.x + a.width) : n;
+            const minY = a ? Math.max(0, a.y) : 0;
+            const maxY = a ? Math.min(o, a.y + a.height) : o;
+            const spanX = Math.max(1, maxX - minX);
+            const spanY = Math.max(1, maxY - minY);
+            for (let sample = 0; sample < 150; sample++) {
               const rx = Math.floor(Math.random() * spanX) + minX;
               const ry = Math.floor(Math.random() * spanY) + minY;
-              if (typeof game.isValidCoord === "function" && !game.isValidCoord(rx, ry)) continue;
-              const ref = typeof game.ref === "function" ? game.ref(rx, ry) : ry * width + rx;
-              if (ref == null || ref < 0) continue;
-              try {
-                if (typeof game.isValidRef === "function" && !game.isValidRef(ref)) continue;
-                if (typeof game.isLand === "function" && !game.isLand(ref)) continue;
-                if (typeof game.hasOwner === "function" && game.hasOwner(ref)) continue;
-                if (typeof game.isBorder === "function" && game.isBorder(ref)) continue;
-                if (typeof game.isImpassable === "function" && game.isImpassable(ref)) continue;
-              } catch (e) {
-                continue;
-              }
-              let tooClose = false;
-              let minDist = Infinity;
-              for (const loc of spawnedCoords) {
-                const d = Math.hypot(rx - loc.x, ry - loc.y);
-                if (d < minPlayerDist) {
-                  tooClose = true;
-                  break;
-                }
-                if (d < minDist) minDist = d;
-              }
-              if (tooClose && spawnedCoords.length > 0 && i < 45) continue;
-              let landCount = 0;
-              let shoreNear = false;
-              for (let dy = -8; dy <= 8; dy += 4) {
-                for (let dx = -8; dx <= 8; dx += 4) {
-                  const nx = rx + dx, ny = ry + dy;
-                  if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                    const nTile = typeof game.ref === "function" ? game.ref(nx, ny) : ny * width + nx;
-                    try {
-                      if (game.isLand(nTile) && !game.hasOwner(nTile)) landCount++;
-                      if (typeof game.isShore === "function" && game.isShore(nTile)) shoreNear = true;
-                    } catch (e) {}
-                  }
-                }
-              }
-              const distFromEdge = Math.min(rx, width - rx, ry, height - ry);
-              const score = landCount * 4 + (shoreNear ? 10 : 0) + Math.min(80, minDist) * 1.5 + distFromEdge * .2 + Math.random() * 5;
+              if (typeof t.isValidCoord === "function" && !t.isValidCoord(rx, ry)) continue;
+              const ref = typeof t.ref === "function" ? t.ref(rx, ry) : ry * n + rx;
+              if (!isCandidateValid(ref)) continue;
+              const score = scoreTile(ref);
               if (score > bestScore) {
                 bestScore = score;
                 bestTile = ref;
               }
             }
             if (bestTile == null) {
-              for (let i = 0; i < 40; i++) {
+              for (let sample = 0; sample < 50; sample++) {
                 const rx = Math.floor(Math.random() * spanX) + minX;
                 const ry = Math.floor(Math.random() * spanY) + minY;
-                const ref = typeof game.ref === "function" ? game.ref(rx, ry) : ry * width + rx;
-                if (ref != null) {
-                  try {
-                    if (game.isLand(ref) && !game.hasOwner(ref)) return ref;
-                  } catch (e) {}
-                }
+                const ref = typeof t.ref === "function" ? t.ref(rx, ry) : ry * n + rx;
+                try {
+                  if (t.isLand(ref) && !t.hasOwner(ref)) return ref;
+                } catch (e) {}
               }
             }
             return bestTile;
