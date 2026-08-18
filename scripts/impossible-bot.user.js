@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Impossible Bot
 // @namespace    blon-extensions
-// @version      4.5.2
+// @version      4.5.3
 // @description  Advanced Autonomous Autoplay Extension for Project Blon
 // @author       blon
 // @match        https://openfront.io/*
@@ -8493,6 +8493,9 @@
           }
         }
         pickSpawnCenter() {
+          if (!this.player) this.player = this.mg?.myPlayer?.() ?? null;
+          const myP = this.player;
+          const mySid = myP?.smallID ? myP.smallID() : null;
           if (typeof companionSpawnCenter === "function") {
             const p = companionSpawnCenter(this.mg, this.player);
             if (p != null) return p;
@@ -8507,12 +8510,12 @@
           } catch (p) {}
           let a = null;
           try {
-            const p = this.player.team();
+            const p = myP?.team ? myP.team() : null;
             if (p !== null && typeof t.__src?.teamSpawnArea === "function") {
               a = t.__src.teamSpawnArea(p) ?? null;
             }
           } catch (p) {}
-          const i = t.players().filter((p => p.smallID() !== this.player.smallID() && p.hasSpawned()));
+          const i = t.players().filter((p => (mySid == null || p.smallID() !== mySid) && p.hasSpawned()));
           const s = p => {
             const h = t.x(p);
             const m = t.y(p);
@@ -8857,20 +8860,20 @@
           this.spawnSent = false;
           this.lastSpawnTile = null;
         }
-        const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
-        if (isSolo) {
-          this.tickImpossible(game);
-          updateUI();
-          return;
-        }
         if (inSpawn) {
-          if (botCfg.autoSpawn && !this.spawnSent) {
+          if (botCfg.autoSpawn !== false && !this.spawnSent) {
             try {
               this.handleAutoSpawn(game);
             } catch (e) {
               console.error("[ImpossibleBot] AutoSpawn error:", e);
             }
           }
+          updateUI();
+          return;
+        }
+        const isSolo = botCfg.mode === "solo" || botCfg.activePreset === "solo";
+        if (isSolo) {
+          this.tickImpossible(game);
           updateUI();
           return;
         }
@@ -9044,7 +9047,7 @@
       handleAutoSpawn(game) {
         if (this.spawnSent && this.lastSpawnTile != null) return;
         const now = Date.now();
-        if (now - this.lastSpawnPickTime < 500) return;
+        if (now - this.lastSpawnPickTime < 300) return;
         this.lastSpawnPickTime = now;
         const tile = this.pickSpawnTile(game);
         if (tile == null) return;
@@ -9060,9 +9063,12 @@
       },
       pickSpawnTile(game) {
         if (!game) return null;
-        const nApi = RatioNationEngine.ensureGameApi(game);
-        const myPlayer = typeof game.myPlayer === "function" ? game.myPlayer() : null;
+        let myPlayer = null;
+        try {
+          myPlayer = typeof game.myPlayer === "function" ? game.myPlayer() : api.getGameState?.()?.myPlayer ?? null;
+        } catch (e) {}
         if (!myPlayer) return null;
+        const nApi = RatioNationEngine.ensureGameApi(game);
         const gId = RatioNationEngine.resolveGameId(game);
         const pId = String(myPlayer.id ? myPlayer.id() : "player");
         const tempBot = new RatioNationEngine.NationBot(nApi.game, {
@@ -9517,7 +9523,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.5.2",
+      version: "4.5.3",
       description: "Advanced Autonomous Autoplay Extension for Project Blon",
       author: "blon",
       tabLabel: "Auto",
