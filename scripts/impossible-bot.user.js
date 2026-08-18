@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      4.3.1
+// @version      4.3.3
 // @description  Advanced Autonomous Autoplay Extension for Project Blon
 // @author       blon
 // @match        *://openfront.io/*
@@ -131,35 +131,36 @@
       triggerRatio: .5,
       reserveRatio: .42,
       expandRatio: .42,
-      botParallelism: 60,
-      tickIntervalMs: 650,
-      hotkey: "b"
+      botParallelism: 80,
+      tickIntervalMs: 350
     };
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        Object.assign(botCfg, JSON.parse(stored));
+    function loadBotCfg() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          Object.assign(botCfg, parsed);
+        }
+      } catch (e) {
+        console.warn("[ImpossibleBot] Failed to load saved config:", e);
       }
-    } catch (e) {}
-    botCfg.autoEmoji = botCfg.autoEmoji === true;
-    if (api && api.cfg && botCfg.autoEmoji !== true) {
-      api.cfg.autoEmojiReactEnabled = false;
     }
+    loadBotCfg();
     function saveBotCfg() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(botCfg));
-      } catch (e) {}
-      if (api && api.cfg && botCfg.autoEmoji !== true) {
-        api.cfg.autoEmojiReactEnabled = false;
+      } catch (e) {
+        console.warn("[ImpossibleBot] Failed to save config:", e);
       }
     }
     function syncAllUIControls() {
-      const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
       const modeSelect = document.getElementById("blon-ext-mode-select");
-      if (modeSelect) modeSelect.value = is1v1 ? "v1v1" : "solo";
+      if (modeSelect) {
+        modeSelect.value = botCfg.activePreset || (botCfg.mode === "1v1" ? "v1v1" : "solo");
+      }
       const setCb = (id, val) => {
         const el = document.getElementById(id);
-        if (el) el.checked = Boolean(val);
+        if (el) el.checked = !!val;
       };
       const setSlider = (sliderId, labelId, val, suffix = "") => {
         const sl = document.getElementById(sliderId);
@@ -273,6 +274,29 @@
         }
       }
     }
+    function getPlayerID(p) {
+      if (!p) return null;
+      try {
+        const id = typeof p.id === "function" ? p.id() : p.id ?? null;
+        if (typeof id === "string" && /^[A-Za-z0-9]{8}$/.test(id)) return id;
+        const clientID = typeof p.clientID === "function" ? p.clientID() : p.clientID ?? null;
+        if (typeof clientID === "string" && /^[A-Za-z0-9]{8}$/.test(clientID)) return clientID;
+      } catch (e) {}
+      return null;
+    }
+    function getPlayerBySmallID(game, smallID) {
+      if (!game || smallID == null || smallID <= 0) return null;
+      try {
+        if (typeof game.playerBySmallID === "function") {
+          const p = game.playerBySmallID(smallID);
+          if (p) return p;
+        }
+        const all = getAllPlayers(game);
+        return all.find((p => getMySmallID(p) === smallID)) || null;
+      } catch (e) {
+        return null;
+      }
+    }
     function getMySmallID(myPlayer) {
       if (!myPlayer) return null;
       try {
@@ -299,81 +323,52 @@
           }
         }
       } catch (e) {}
-      const myID = getMySmallID(myPlayer);
-      if (!myID || !game) return new Set;
-      const set = new Set;
       try {
-        if (typeof myPlayer.tiles === "function") {
-          const allTiles = myPlayer.tiles();
-          const list = Array.isArray(allTiles) ? allTiles : allTiles instanceof Set ? Array.from(allTiles) : [];
-          for (const tile of list) {
-            let isBorder = false;
-            forEachNeighbor(game, tile, (n => {
-              if (isBorder) return;
-              try {
-                if (!game.isLand(n) || game.ownerID(n) !== myID) isBorder = true;
-              } catch (e) {}
-            }));
-            if (isBorder) set.add(tile);
-          }
+        const myID = getMySmallID(myPlayer);
+        if (!myID) return new Set;
+        const myTiles = typeof myPlayer.tiles === "function" ? myPlayer.tiles() : [];
+        const result = new Set;
+        for (const tile of myTiles) {
+          let isBorder = false;
+          forEachNeighbor(game, tile, (n => {
+            try {
+              if (game.ownerID(n) !== myID) isBorder = true;
+            } catch (e) {}
+          }));
+          if (isBorder) result.add(tile);
         }
-      } catch (e) {}
-      return set;
-    }
-    function getBorderingPlayerIDs(game, myPlayer) {
-      const myID = getMySmallID(myPlayer);
-      if (!myID || !game) return new Map;
-      const map = new Map;
-      const bts = getBorderTiles(game, myPlayer);
-      const scanNeighbors = tile => {
-        forEachNeighbor(game, tile, (n => {
-          try {
-            const ownerID = game.ownerID(n);
-            if (ownerID && ownerID > 0 && ownerID !== myID && !map.has(ownerID)) {
-              const p = typeof game.playerBySmallID === "function" ? game.playerBySmallID(ownerID) : null;
-              if (p) map.set(ownerID, p);
-            }
-          } catch (e) {}
-        }));
-      };
-      for (const tile of bts) scanNeighbors(tile);
-      return map;
-    }
-    function hasBorderWithTerraNullius(game, myPlayer) {
-      const myID = getMySmallID(myPlayer);
-      if (!myID || !game) return false;
-      const bts = getBorderTiles(game, myPlayer);
-      for (const tile of bts) {
-        let found = false;
-        forEachNeighbor(game, tile, (n => {
-          if (found) return;
-          try {
-            if (typeof game.isLand === "function" && !game.isLand(n)) return;
-            const hasOwner = typeof game.hasOwner === "function" ? game.hasOwner(n) : true;
-            const ownerID = typeof game.ownerID === "function" ? game.ownerID(n) : null;
-            if (!hasOwner || ownerID === null || ownerID === undefined || ownerID === 0 || ownerID === -1) {
-              if (typeof game.hasFallout === "function" && game.hasFallout(n)) return;
-              found = true;
-            }
-          } catch (e) {}
-        }));
-        if (found) return true;
+        return result;
+      } catch (e) {
+        return new Set;
       }
-      return false;
     }
-    function getMaxTroops(game, player) {
-      if (!game || !player) return 1e3;
+    function getInteriorTiles(game, myPlayer) {
+      if (!game || !myPlayer) return [];
       try {
-        const cfg = typeof game.config === "function" ? game.config() : null;
-        if (cfg && typeof cfg.maxTroops === "function") return Number(cfg.maxTroops(player)) || 1e3;
-      } catch (e) {}
-      return 1e3;
+        const myID = getMySmallID(myPlayer);
+        if (!myID) return [];
+        const myTiles = typeof myPlayer.tiles === "function" ? myPlayer.tiles() : [];
+        const result = [];
+        for (const tile of myTiles) {
+          let interior = true;
+          forEachNeighbor(game, tile, (n => {
+            try {
+              if (game.ownerID(n) !== myID) interior = false;
+            } catch (e) {}
+          }));
+          if (interior) result.push(tile);
+        }
+        return result;
+      } catch (e) {
+        return [];
+      }
     }
     function playerTroops(p) {
       if (!p) return 0;
       try {
-        const t = typeof p.troops === "function" ? p.troops() : p.troops || 0;
-        return typeof t === "bigint" ? Number(t) : Number(t || 0);
+        const t = typeof p.troops === "function" ? p.troops() : p.troops;
+        if (typeof t === "bigint") return Number(t);
+        return Number(t) || 0;
       } catch (e) {
         return 0;
       }
@@ -381,41 +376,46 @@
     function playerGold(p) {
       if (!p) return 0;
       try {
-        const g = typeof p.gold === "function" ? p.gold() : p.gold || 0;
-        return typeof g === "bigint" ? Number(g) : Number(g || 0);
+        const g = typeof p.gold === "function" ? p.gold() : p.gold;
+        if (typeof g === "bigint") return Number(g);
+        return Number(g) || 0;
       } catch (e) {
         return 0;
       }
     }
-    function playerType(p) {
-      if (!p) return "";
+    function getMaxTroops(game, p) {
+      if (!p) return 1e5;
       try {
-        return typeof p.type === "function" ? p.type() : p.type || "";
-      } catch (e) {
-        return "";
-      }
-    }
-    function isBot(p) {
-      if (!p) return false;
-      const t = playerType(p);
-      return t === "BOT" || t === "NATION" || t === "Bot" || t === 2;
+        if (game && typeof game.config === "function") {
+          const cfg = game.config();
+          if (cfg && typeof cfg.maxTroops === "function") {
+            const res = cfg.maxTroops(p);
+            if (Number.isFinite(res) && res > 0) return res;
+          }
+        }
+      } catch (e) {}
+      try {
+        if (typeof p.maxTroops === "function") {
+          const res = p.maxTroops();
+          if (Number.isFinite(res) && res > 0) return res;
+        }
+      } catch (e) {}
+      return 1e5;
     }
     function isAlive(p) {
       if (!p) return false;
       try {
-        return typeof p.isAlive === "function" ? p.isAlive() : true;
+        if (typeof p.isAlive === "function") return p.isAlive();
+        return playerTroops(p) > 0;
       } catch (e) {
         return false;
       }
     }
     function isFriendly(myPlayer, other) {
       if (!myPlayer || !other) return false;
-      if (typeof other.isPlayer === "function" && !other.isPlayer()) return true;
-      if (typeof api.isFriendlyPlayer === "function") {
-        try {
-          return api.isFriendlyPlayer(myPlayer, other);
-        } catch (e) {}
-      }
+      try {
+        if (typeof myPlayer.isFriendly === "function") return myPlayer.isFriendly(other);
+      } catch (e) {}
       try {
         const id1 = typeof myPlayer.id === "function" ? myPlayer.id() : myPlayer.id;
         const id2 = typeof other.id === "function" ? other.id() : other.id;
@@ -423,12 +423,167 @@
       } catch (e) {}
       return false;
     }
+    function validateAndSanitizeIntent(intent) {
+      if (!intent || typeof intent !== "object" || typeof intent.type !== "string") return null;
+      const isValidID = id => typeof id === "string" && /^[A-Za-z0-9]{8}$/.test(id);
+      switch (intent.type) {
+       case "spawn":
+        {
+          const tile = Math.floor(Number(intent.tile));
+          if (!Number.isFinite(tile) || tile < 0) return null;
+          return {
+            type: "spawn",
+            tile: tile
+          };
+        }
+
+       case "attack":
+        {
+          const targetID = intent.targetID ? String(intent.targetID) : null;
+          if (targetID !== null && !isValidID(targetID)) return null;
+          const troops = intent.troops != null ? Math.max(0, Math.floor(Number(intent.troops))) : null;
+          return {
+            type: "attack",
+            targetID: targetID,
+            troops: troops
+          };
+        }
+
+       case "boat":
+        {
+          const dst = Math.floor(Number(intent.dst));
+          const troops = Math.max(0, Math.floor(Number(intent.troops)));
+          if (!Number.isFinite(dst) || dst < 0 || !Number.isFinite(troops) || troops <= 0) return null;
+          return {
+            type: "boat",
+            dst: dst,
+            troops: troops
+          };
+        }
+
+       case "build_unit":
+        {
+          const VALID_UNITS = new Set([ "City", "Port", "Factory", "Defense Post", "SAM Launcher", "Missile Silo", "Atom Bomb", "Hydrogen Bomb", "MIRV", "Warship" ]);
+          if (!VALID_UNITS.has(intent.unit)) return null;
+          const tile = Math.floor(Number(intent.tile));
+          if (!Number.isFinite(tile) || tile < 0) return null;
+          const out = {
+            type: "build_unit",
+            unit: intent.unit,
+            tile: tile
+          };
+          if (typeof intent.rocketDirectionUp === "boolean") out.rocketDirectionUp = intent.rocketDirectionUp;
+          return out;
+        }
+
+       case "move_warship":
+        {
+          const rawIds = Array.isArray(intent.unitIds) ? intent.unitIds : Array.isArray(intent.unitIDs) ? intent.unitIDs : [];
+          const unitIds = rawIds.map((n => Math.floor(Number(n)))).filter((n => Number.isFinite(n)));
+          const tile = Math.floor(Number(intent.tile ?? intent.dst));
+          if (unitIds.length === 0 || !Number.isFinite(tile) || tile < 0) return null;
+          return {
+            type: "move_warship",
+            unitIds: unitIds,
+            tile: tile
+          };
+        }
+
+       case "allianceRequest":
+       case "alliance_request":
+        {
+          const recipient = String(intent.recipient ?? intent.targetID);
+          if (!isValidID(recipient)) return null;
+          return {
+            type: "allianceRequest",
+            recipient: recipient
+          };
+        }
+
+       case "allianceReject":
+       case "alliance_reply":
+        {
+          const requestor = String(intent.requestor ?? intent.targetID);
+          if (!isValidID(requestor)) return null;
+          return {
+            type: "allianceReject",
+            requestor: requestor
+          };
+        }
+
+       case "allianceExtension":
+        {
+          const recipient = String(intent.recipient ?? intent.targetID);
+          if (!isValidID(recipient)) return null;
+          return {
+            type: "allianceExtension",
+            recipient: recipient
+          };
+        }
+
+       case "breakAlliance":
+        {
+          const recipient = String(intent.recipient ?? intent.targetID);
+          if (!isValidID(recipient)) return null;
+          return {
+            type: "breakAlliance",
+            recipient: recipient
+          };
+        }
+
+       case "donate_troops":
+        {
+          const recipient = String(intent.recipient ?? intent.targetID);
+          if (!isValidID(recipient)) return null;
+          const troops = Math.max(1, Math.floor(Number(intent.troops)));
+          if (!Number.isFinite(troops) || troops <= 0) return null;
+          return {
+            type: "donate_troops",
+            recipient: recipient,
+            troops: troops
+          };
+        }
+
+       case "embargo":
+        {
+          const targetID = String(intent.targetID ?? intent.recipient);
+          if (!isValidID(targetID)) return null;
+          const action = intent.action === "stop" ? "stop" : "start";
+          return {
+            type: "embargo",
+            targetID: targetID,
+            action: action
+          };
+        }
+
+       case "emoji":
+        {
+          const recipient = intent.recipient === "AllPlayers" ? "AllPlayers" : String(intent.recipient);
+          if (recipient !== "AllPlayers" && !isValidID(recipient)) return null;
+          const emoji = Math.floor(Number(intent.emoji));
+          if (!Number.isFinite(emoji) || emoji < 0 || emoji > 59) return null;
+          return {
+            type: "emoji",
+            recipient: recipient,
+            emoji: emoji
+          };
+        }
+
+       default:
+        return null;
+      }
+    }
     function sendPacket(intent) {
-      if (intent && intent.type === "emoji" && botCfg.autoEmoji !== true) {
+      if (!intent) return false;
+      if (intent.type === "emoji" && botCfg.autoEmoji !== true) {
         return false;
       }
-      if (typeof api.sendPacket === "function") return api.sendPacket(intent);
-      if (typeof api.sendIntent === "function") return api.sendIntent(intent);
+      const sanitized = validateAndSanitizeIntent(intent);
+      if (!sanitized) {
+        return false;
+      }
+      if (typeof api.sendPacket === "function") return api.sendPacket(sanitized);
+      if (typeof api.sendIntent === "function") return api.sendIntent(sanitized);
       return false;
     }
     function getPlayerName(p) {
@@ -484,163 +639,112 @@
         return Infinity;
       }
     }
-    function getPlayerCenter(game, player) {
-      if (!game || !player) return null;
+    function getPlayerCenter(game, p) {
+      if (!p || !game) return null;
       try {
-        const w = typeof game.width === "function" ? game.width() : game.width || 500;
-        const st = typeof player.spawnTile === "function" ? player.spawnTile() : player.spawnTile;
-        if (st != null && typeof st === "number" && st >= 0) {
-          return {
-            x: st % w,
-            y: Math.floor(st / w)
-          };
+        if (typeof p.nameLocation === "function") {
+          const loc = p.nameLocation();
+          if (loc && Number.isFinite(loc.x) && Number.isFinite(loc.y)) return loc;
         }
-        const bts = getBorderTiles(game, player);
-        const arr = Array.from(bts);
-        if (arr.length === 0) return null;
-        let sx = 0, sy = 0;
-        const sample = Math.min(arr.length, 20);
-        for (let i = 0; i < sample; i++) {
-          const t = arr[Math.floor(i * arr.length / sample)];
+      } catch (e) {}
+      try {
+        const bts = getBorderTiles(game, p);
+        if (bts.size === 0) return null;
+        const w = typeof game.width === "function" ? game.width() : game.width || 500;
+        let sx = 0, sy = 0, c = 0;
+        for (const t of bts) {
           sx += t % w;
           sy += Math.floor(t / w);
+          c++;
         }
-        return {
-          x: sx / sample,
-          y: sy / sample
-        };
+        return c > 0 ? {
+          x: sx / c,
+          y: sy / c
+        } : null;
       } catch (e) {
         return null;
       }
     }
-    function getInteriorTiles(game, myPlayer) {
-      if (!game || !myPlayer) return [];
+    function getBorderingPlayerIDs(game, myPlayer) {
+      if (!game || !myPlayer) return new Map;
       const myID = getMySmallID(myPlayer);
-      if (!myID) return [];
-      const bts = getBorderTiles(game, myPlayer);
-      const interiors = [];
+      const bordering = new Map;
+      const myBts = getBorderTiles(game, myPlayer);
+      for (const tile of myBts) {
+        forEachNeighbor(game, tile, (n => {
+          try {
+            const o = game.ownerID(n);
+            if (o && o !== myID && !bordering.has(o)) {
+              const p = getPlayerBySmallID(game, o);
+              if (p) bordering.set(o, p);
+            }
+          } catch (e) {}
+        }));
+      }
+      return bordering;
+    }
+    function hasBorderWithTerraNullius(game, myPlayer) {
+      if (!game || !myPlayer) return false;
+      const myBts = getBorderTiles(game, myPlayer);
+      for (const tile of myBts) {
+        let touchesTN = false;
+        forEachNeighbor(game, tile, (n => {
+          try {
+            if (game.isLand(n) && !game.hasOwner(n)) touchesTN = true;
+          } catch (e) {}
+        }));
+        if (touchesTN) return true;
+      }
+      return false;
+    }
+    function isBot(p) {
+      if (!p) return false;
       try {
-        if (typeof myPlayer.tiles === "function") {
-          const all = myPlayer.tiles();
-          const list = Array.isArray(all) ? all : all instanceof Set ? Array.from(all) : [];
-          for (const t of list) {
-            if (!bts.has(t)) interiors.push(t);
-          }
-          if (interiors.length > 0) return interiors;
-        }
-      } catch (e) {}
-      return interiors.length > 0 ? interiors : Array.from(bts);
+        const t = typeof p.type === "function" ? p.type() : p.type;
+        return t === "BOT" || t === "NATION";
+      } catch (e) {
+        return false;
+      }
     }
     function findInteriorTile(game, myPlayer) {
-      if (!game || !myPlayer) return null;
       const ints = getInteriorTiles(game, myPlayer);
-      if (ints.length > 0) {
-        return ints[Math.floor(Math.random() * ints.length)];
-      }
+      if (ints.length > 0) return ints[Math.floor(Math.random() * ints.length)];
       const bts = Array.from(getBorderTiles(game, myPlayer));
-      return bts[Math.floor(bts.length / 2)] || null;
+      if (bts.length > 0) return bts[Math.floor(Math.random() * bts.length)];
+      return null;
     }
     function findOwnedShoreTile(game, myPlayer) {
-      if (!game || !myPlayer) return null;
-      const bts = getBorderTiles(game, myPlayer);
-      for (const t of bts) {
-        try {
-          if (typeof game.isShore === "function" && game.isShore(t)) return t;
-        } catch (e) {}
+      const bts = Array.from(getBorderTiles(game, myPlayer));
+      const shores = bts.filter((t => typeof game.isShore === "function" && game.isShore(t)));
+      if (shores.length > 0) return shores[Math.floor(Math.random() * shores.length)];
+      return findInteriorTile(game, myPlayer);
+    }
+    function findTargetCityTile(p) {
+      if (!p) return null;
+      const cities = playerUnits(p).filter((u => unitType(u) === "City"));
+      if (cities.length > 0) {
+        const c = cities[Math.floor(Math.random() * cities.length)];
+        return typeof c.tile === "function" ? c.tile() : c.tile;
       }
       return null;
     }
-    function findTargetShoreTile(game, target) {
-      if (!game || !target) return null;
-      const bts = getBorderTiles(game, target);
-      for (const t of bts) {
-        try {
-          if (typeof game.isShore === "function" && game.isShore(t)) return t;
-        } catch (e) {}
-      }
-      const arr = Array.from(bts);
-      return arr[0] || null;
-    }
-    function findTargetCityTile(target) {
-      if (!target) return null;
-      const units = playerUnits(target);
-      for (const u of units) {
-        const t = unitType(u);
-        if (t === "City" || t === "Missile Silo") {
-          const tile = typeof u.tile === "function" ? u.tile() : u.tile;
-          if (tile != null) return tile;
-        }
-      }
+    function findTargetShoreTile(game, p) {
+      if (!p || !game) return null;
+      const bts = Array.from(getBorderTiles(game, p));
+      const shores = bts.filter((t => typeof game.isShore === "function" && game.isShore(t)));
+      if (shores.length > 0) return shores[Math.floor(Math.random() * shores.length)];
+      if (bts.length > 0) return bts[Math.floor(Math.random() * bts.length)];
       return null;
     }
-    function euclideanDist(game, t1, t2) {
-      if (t1 == null || t2 == null) return Infinity;
-      if (typeof game?.euclideanDist === "function") return game.euclideanDist(t1, t2);
-      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
-      const x1 = t1 % w, y1 = Math.floor(t1 / w);
-      const x2 = t2 % w, y2 = Math.floor(t2 / w);
-      return Math.hypot(x1 - x2, y1 - y2);
-    }
-    function euclideanDistSquared(game, t1, t2) {
-      if (t1 == null || t2 == null) return Infinity;
-      if (typeof game?.euclideanDistSquared === "function") return game.euclideanDistSquared(t1, t2);
-      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
-      const x1 = t1 % w, y1 = Math.floor(t1 / w);
-      const x2 = t2 % w, y2 = Math.floor(t2 / w);
-      const dx = x1 - x2, dy = y1 - y2;
-      return dx * dx + dy * dy;
-    }
-    function manhattanDist(game, t1, t2) {
-      if (t1 == null || t2 == null) return Infinity;
-      if (typeof game?.manhattanDist === "function") return game.manhattanDist(t1, t2);
-      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
-      const x1 = t1 % w, y1 = Math.floor(t1 / w);
-      const x2 = t2 % w, y2 = Math.floor(t2 / w);
-      return Math.abs(x1 - x2) + Math.abs(y1 - y2);
-    }
-    function closestTile(game, candidates, targetTile) {
-      if (!candidates || candidates.length === 0 || targetTile == null) return [ null, Infinity ];
-      let best = null;
-      let minD = Infinity;
-      for (const t of candidates) {
-        const d = euclideanDistSquared(game, t, targetTile);
-        if (d < minD) {
-          minD = d;
-          best = t;
-        }
-      }
-      return [ best, Math.sqrt(minD) ];
-    }
-    function closestTwoTiles(game, listA, listB) {
-      if (!listA || listA.length === 0 || !listB || listB.length === 0) return null;
-      let bestA = null, bestB = null, minD = Infinity;
-      for (const a of listA) {
-        for (const b of listB) {
-          const d = euclideanDistSquared(game, a, b);
-          if (d < minD) {
-            minD = d;
-            bestA = a;
-            bestB = b;
-          }
-        }
-      }
-      return bestA != null ? {
-        x: bestA,
-        y: bestB,
-        dist: Math.sqrt(minD)
-      } : null;
-    }
-    function randTerritoryTileArray(game, player, count = 25) {
-      if (!player) return [];
-      const ints = getInteriorTiles(game, player);
-      const bts = Array.from(getBorderTiles(game, player));
-      const pool = ints.concat(bts);
-      if (pool.length === 0) return [];
-      const result = [];
+    function randTerritoryTileArray(game, p, count = 20) {
+      if (!p || !game) return [];
+      const bts = Array.from(getBorderTiles(game, p));
+      if (bts.length === 0) return [];
+      const results = [];
       for (let i = 0; i < count; i++) {
-        result.push(pool[Math.floor(Math.random() * pool.length)]);
+        results.push(bts[Math.floor(Math.random() * bts.length)]);
       }
-      return result;
+      return results;
     }
     const OppTracker = {
       samples: [],
@@ -893,61 +997,64 @@
         unownedTiles: Array.from(unownedNeighbors)
       };
     }
-    function findOurVulnerableNecks(game, myPlayer, opponent) {
-      if (!myPlayer || !opponent) return [];
-      const myID = getMySmallID(myPlayer);
-      const oppID = getMySmallID(opponent);
-      if (!myID || !oppID) return [];
-      const myBts = getBorderTiles(game, myPlayer);
-      const vulnerableTiles = [];
-      for (const tile of myBts) {
-        let oppCount = 0;
-        let emptyCount = 0;
-        let myCount = 0;
-        forEachNeighbor(game, tile, (n => {
-          try {
-            const o = game.ownerID(n);
-            if (o === oppID) oppCount++; else if (o === myID) myCount++; else if (!game.hasOwner(n) || o === 0 || o === -1) emptyCount++;
-          } catch (e) {}
-        }));
-        if (oppCount >= 2 && myCount <= 1) {
-          vulnerableTiles.push({
-            tile: tile,
-            threat: oppCount * 2 + emptyCount
-          });
-        }
-      }
-      vulnerableTiles.sort(((a, b) => b.threat - a.threat));
-      return vulnerableTiles.map((v => v.tile));
-    }
     function getGamePhase(game) {
+      if (!game) return "mid";
       try {
-        const turn = typeof game.turnNumber === "function" ? game.turnNumber() : 0;
-        if (turn < 300) return "early";
-        if (turn < 900) return "mid";
+        const totalLand = typeof game.numLandTiles === "function" ? game.numLandTiles() : 5e4;
+        const all = getAllPlayers(game);
+        let ownedLand = 0;
+        for (const p of all) {
+          if (isAlive(p)) {
+            ownedLand += typeof p.numTilesOwned === "function" ? Number(p.numTilesOwned()) || 0 : 0;
+          }
+        }
+        const landClaimedPct = ownedLand / Math.max(1, totalLand);
+        if (landClaimedPct < .65) return "early";
+        if (landClaimedPct < .9) return "mid";
         return "late";
       } catch (e) {
         return "mid";
       }
     }
-    function getDynamicReserve(game, myPlayer, opponent, phase) {
-      const base = botCfg.reserveRatio ?? .42;
-      const fl = analyzeFrontline(game, myPlayer, opponent);
-      let flMod = 0;
-      if (fl && fl.vulnerability > .3) flMod = .08;
-      let punishMod = OppTracker.isPunishWindow ? -.08 : 0;
-      let phaseMod = phase === "early" ? -.05 : phase === "late" ? .05 : 0;
-      return Math.max(.2, Math.min(.65, base + flMod + punishMod + phaseMod));
+    function getDynamicReserve(game, myPlayer, opponent, phase = "mid") {
+      const baseReserve = botCfg.reserveRatio ?? .42;
+      const effBase = getEffectiveReserveRatio(game, myPlayer, baseReserve);
+      const isPunish = OppTracker.isPunishWindow;
+      const inDPRange = frontlineInDPRange(game, myPlayer, opponent);
+      let mult = 1;
+      if (isPunish) mult = .55; else if (inDPRange) mult = 1.45; else if (phase === "early") mult = .85; else if (phase === "late") mult = 1.25;
+      return Math.max(.2, Math.min(.7, effBase * mult));
+    }
+    function findOurVulnerableNecks(game, myPlayer, opponent) {
+      if (!opponent || !myPlayer) return [];
+      const myID = getMySmallID(myPlayer);
+      const myBts = getBorderTiles(game, myPlayer);
+      const necks = [];
+      for (const tile of myBts) {
+        let emptyCount = 0;
+        let myCount = 0;
+        forEachNeighbor(game, tile, (n => {
+          try {
+            const o = game.ownerID(n);
+            if (!game.hasOwner(n) || o === null || o === undefined || o === 0 || o === -1) {
+              if (game.isLand(n)) emptyCount++;
+            } else if (o === myID) {
+              myCount++;
+            }
+          } catch (e) {}
+        }));
+        if (emptyCount >= 2 && myCount <= 2) necks.push(tile);
+      }
+      return necks;
     }
     function find1v1CityTile(game, myPlayer, existingCities = [], opponent = null) {
       const ints = getInteriorTiles(game, myPlayer);
       if (ints.length === 0) return findInteriorTile(game, myPlayer);
-      const w = typeof game.width === "function" ? game.width() : 500;
-      const oppCenter = opponent ? getPlayerCenter(game, opponent) : null;
-      const myBts = getBorderTiles(game, myPlayer);
-      let bestTile = null;
-      let bestScore = -Infinity;
       const minSpacing = 16;
+      const oppCenter = opponent ? getPlayerCenter(game, opponent) : null;
+      const w = typeof game.width === "function" ? game.width() : 500;
+      let bestTile = null;
+      let maxDistFromOpp = -1;
       for (const tile of ints) {
         let tooClose = false;
         for (const c of existingCities) {
@@ -958,30 +1065,26 @@
           }
         }
         if (tooClose) continue;
-        let distToBorder = Infinity;
-        for (const bt of myBts) {
-          const d = calcTileDist(game, tile, bt);
-          if (d < distToBorder) distToBorder = d;
-        }
-        let oppDist = 0;
+        let distFromOpp = 0;
         if (oppCenter) {
           const x = tile % w, y = Math.floor(tile / w);
-          oppDist = Math.hypot(x - oppCenter.x, y - oppCenter.y);
+          distFromOpp = Math.hypot(x - oppCenter.x, y - oppCenter.y);
+        } else {
+          distFromOpp = Math.random() * 100;
         }
-        const score = distToBorder * 2 + oppDist * 1.5;
-        if (score > bestScore) {
-          bestScore = score;
+        if (distFromOpp > maxDistFromOpp) {
+          maxDistFromOpp = distFromOpp;
           bestTile = tile;
         }
       }
       return bestTile || ints[0] || null;
     }
-    function find1v1DefensePostTile(game, myPlayer, opponent, existingDPs = [], activeAttacks = []) {
+    function find1v1DefensePostTile(game, myPlayer, opponent, existingDPs = []) {
       const fl = analyzeFrontline(game, myPlayer, opponent);
-      const myBts = getBorderTiles(game, myPlayer);
-      const candidates = fl && fl.sharedBorder.length > 0 ? fl.sharedBorder : Array.from(myBts);
-      if (candidates.length === 0) return findInteriorTile(game, myPlayer);
-      const minSpacing = 28;
+      const candidates = fl && fl.sharedBorder.length > 0 ? fl.sharedBorder : Array.from(getBorderTiles(game, myPlayer));
+      if (candidates.length === 0) return null;
+      const minSpacing = 20;
+      const activeAttacks = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
       let bestTile = null;
       let bestScore = -Infinity;
       for (const tile of candidates) {
@@ -1118,10 +1221,10 @@
     function sendLandAttack(game, myPlayer, target, myTroops, maxTroops, botAttackSent = 0, reserveRatio = null) {
       const sendAmt = calcLandAttackTroops(game, myPlayer, target, myTroops, maxTroops, botAttackSent, reserveRatio);
       if (sendAmt < 1) return false;
-      const targetID = target && (typeof target.isPlayer === "function" ? target.isPlayer() : true) ? typeof target.id === "function" ? target.id() : target.id : null;
+      const targetID = target && (typeof target.isPlayer === "function" ? target.isPlayer() : true) ? getPlayerID(target) : null;
       return sendPacket({
         type: "attack",
-        targetID: targetID ? String(targetID) : null,
+        targetID: targetID,
         troops: sendAmt
       });
     }
@@ -1453,12 +1556,13 @@
           }));
           for (const bot of bots.slice(0, cap)) {
             if (availableBudget <= 0) break;
-            const botId = typeof bot.id === "function" ? bot.id() : bot.id;
+            const botId = getPlayerID(bot);
+            if (!botId) continue;
             const sendAmt = this.calculateBotAttackTroops(bot, availableBudget);
             if (sendAmt >= 1) {
               if (sendPacket({
                 type: "attack",
-                targetID: String(botId),
+                targetID: botId,
                 troops: sendAmt
               })) {
                 attacked++;
@@ -1503,17 +1607,17 @@
             return a.ratio - b.ratio;
           }));
           const targetAlly = needEntries[0].player;
-          const allyId = typeof targetAlly.id === "function" ? targetAlly.id() : targetAlly.id;
+          const allyId = getPlayerID(targetAlly);
           const donateAmt = Math.floor(Math.min(excess, myTr * .2));
           if (donateAmt > 1e3 && allyId) {
             if (sendPacket({
               type: "donate_troops",
-              recipient: String(allyId),
+              recipient: allyId,
               troops: donateAmt
             })) {
               if (botCfg.autoEmoji === true) sendPacket({
                 type: "emoji",
-                recipient: String(allyId),
+                recipient: allyId,
                 emoji: EMOJI_IDX.HEART
               });
               return true;
@@ -1635,9 +1739,10 @@
           if (veryWeak && sendLandAttack(game, myPlayer, veryWeak, myTroops, maxTroops, Engine.botAttackTroopsSent, reserveRatio)) {
             Engine.lastAttackMs = now;
             Engine.stats.attacksSent++;
-            if (botCfg.autoEmoji === true) sendPacket({
+            const weakId = getPlayerID(veryWeak);
+            if (weakId && botCfg.autoEmoji === true) sendPacket({
               type: "emoji",
-              recipient: String(getMySmallID(veryWeak)),
+              recipient: weakId,
               emoji: EMOJI_IDX.DEVIL
             });
             return;
@@ -1646,9 +1751,10 @@
           if (traitor && sendLandAttack(game, myPlayer, traitor, myTroops, maxTroops, Engine.botAttackTroopsSent, reserveRatio)) {
             Engine.lastAttackMs = now;
             Engine.stats.attacksSent++;
-            if (botCfg.autoEmoji === true) sendPacket({
+            const traitorId = getPlayerID(traitor);
+            if (traitorId && botCfg.autoEmoji === true) sendPacket({
               type: "emoji",
-              recipient: String(getMySmallID(traitor)),
+              recipient: traitorId,
               emoji: EMOJI_IDX.ANGRY
             });
             return;
@@ -1868,12 +1974,12 @@
               const tTile = typeof tgtTransport.tile === "function" ? tgtTransport.tile() : tgtTransport.tile;
               if (tTile != null) {
                 const ws = warships[0];
-                const wsId = typeof ws.id === "function" ? ws.id() : ws.id;
-                if (wsId != null) {
+                const wsId = typeof ws.id === "function" ? ws.id() : typeof ws.unitId === "function" ? ws.unitId() : ws.id;
+                if (wsId != null && Number.isFinite(Number(wsId))) {
                   sendPacket({
                     type: "move_warship",
-                    unitIDs: [ wsId ],
-                    dst: tTile
+                    unitIds: [ Number(wsId) ],
+                    tile: tTile
                   });
                 }
               }
@@ -2010,9 +2116,10 @@
                 tile: targetTile,
                 time: Date.now()
               });
-              if (botCfg.autoEmoji === true) sendPacket({
+              const targetId = getPlayerID(target);
+              if (targetId && botCfg.autoEmoji === true) sendPacket({
                 type: "emoji",
-                recipient: String(getMySmallID(target)),
+                recipient: targetId,
                 emoji: EMOJI_IDX.RADIATION
               });
               return true;
@@ -2081,9 +2188,10 @@
               tile: bestTile
             })) {
               Engine.stats.nukesLaunched++;
-              if (botCfg.autoEmoji === true) sendPacket({
+              const targetId = getPlayerID(target);
+              if (targetId && botCfg.autoEmoji === true) sendPacket({
                 type: "emoji",
-                recipient: String(getMySmallID(target)),
+                recipient: targetId,
                 emoji: EMOJI_IDX.RADIATION
               });
               return true;
@@ -2102,18 +2210,26 @@
             for (const req of requests) {
               const requestor = typeof req.requestor === "function" ? req.requestor() : req.requestor;
               if (!requestor || isBot(requestor)) {
-                if (typeof req.reject === "function") req.reject(); else sendPacket({
-                  type: "alliance_reply",
-                  targetID: String(getMySmallID(requestor)),
-                  accept: false
-                });
+                if (typeof req.reject === "function") {
+                  req.reject();
+                } else {
+                  const reqId = getPlayerID(requestor);
+                  if (reqId) sendPacket({
+                    type: "allianceReject",
+                    requestor: reqId
+                  });
+                }
                 continue;
               }
-              if (typeof req.accept === "function") req.accept(); else sendPacket({
-                type: "alliance_reply",
-                targetID: String(getMySmallID(requestor)),
-                accept: true
-              });
+              if (typeof req.accept === "function") {
+                req.accept();
+              } else {
+                const reqId = getPlayerID(requestor);
+                if (reqId) sendPacket({
+                  type: "allianceRequest",
+                  recipient: reqId
+                });
+              }
             }
           } catch (e) {}
           const now = Date.now();
@@ -2123,10 +2239,10 @@
             const farCandidates = all.filter((p => !isFriendly(myPlayer, p) && isAlive(p) && !isBot(p)));
             if (farCandidates.length > 0) {
               const pick = farCandidates[Math.floor(Math.random() * farCandidates.length)];
-              const pickId = typeof pick.id === "function" ? pick.id() : pick.id;
+              const pickId = getPlayerID(pick);
               if (pickId) sendPacket({
-                type: "alliance_request",
-                targetID: String(pickId)
+                type: "allianceRequest",
+                recipient: pickId
               });
             }
           }
@@ -2138,10 +2254,10 @@
             for (const atk of incoming) {
               const attacker = typeof atk.attacker === "function" ? atk.attacker() : atk.attacker;
               if (attacker && !isFriendly(myPlayer, attacker)) {
-                const aId = typeof attacker.id === "function" ? attacker.id() : attacker.id;
+                const aId = getPlayerID(attacker);
                 if (aId) sendPacket({
                   type: "embargo",
-                  targetID: String(aId),
+                  targetID: aId,
                   action: "start"
                 });
               }
@@ -2387,7 +2503,7 @@
           this.lastSpawnTile = null;
         }
         if (inSpawn) {
-          if (botCfg.autoSpawn) {
+          if (botCfg.autoSpawn && !this.spawnSent) {
             try {
               this.handleAutoSpawn(game);
             } catch (e) {
@@ -2399,6 +2515,26 @@
         }
         const myPlayer = state.myPlayer;
         if (!myPlayer || !isAlive(myPlayer)) {
+          updateUI();
+          return;
+        }
+        let hasSpawned = false;
+        try {
+          hasSpawned = typeof myPlayer.hasSpawned === "function" ? myPlayer.hasSpawned() : Boolean(myPlayer.spawnTile?.());
+        } catch (e) {
+          hasSpawned = false;
+        }
+        if (!hasSpawned) {
+          updateUI();
+          return;
+        }
+        let myTiles = 0;
+        try {
+          myTiles = typeof myPlayer.numTilesOwned === "function" ? Number(myPlayer.numTilesOwned()) : myPlayer.tiles?.()?.length || 0;
+        } catch (e) {
+          myTiles = 0;
+        }
+        if (myTiles <= 0) {
           updateUI();
           return;
         }
@@ -2460,10 +2596,10 @@
           if (!atk) continue;
           const attacker = typeof atk.attacker === "function" ? atk.attacker() : null;
           if (attacker && !isFriendly(myPlayer, attacker)) {
-            const aId = typeof attacker.id === "function" ? attacker.id() : attacker.id;
+            const aId = getPlayerID(attacker);
             if (aId) sendPacket({
               type: "embargo",
-              targetID: String(aId),
+              targetID: aId,
               action: "start"
             });
           }
@@ -2514,15 +2650,15 @@
         return anyOpponents[0] || null;
       },
       handleAutoSpawn(game) {
+        if (this.spawnSent && this.lastSpawnTile != null) return;
         const now = Date.now();
         if (now - this.lastSpawnPickTime < 500) return;
         this.lastSpawnPickTime = now;
         const tile = this.pickSpawnTile(game);
         if (tile == null) return;
-        if (this.spawnSent && this.lastSpawnTile === tile) return;
         const ok = sendPacket({
           type: "spawn",
-          tile: Number(tile)
+          tile: Math.floor(Number(tile))
         });
         if (ok) {
           this.spawnSent = true;
@@ -2754,11 +2890,12 @@
             if (botCfg.autoEmoji === true) this.sendEmojiTo(opponent, EMOJI_IDX.RADIATION);
             const myTr = playerTroops(myPlayer);
             const assaultTroops = Math.floor(myTr * .35);
-            if (assaultTroops > 1e3) {
+            const oppId = getPlayerID(opponent);
+            if (assaultTroops > 1e3 && oppId) {
               setTimeout((() => {
                 sendPacket({
                   type: "attack",
-                  targetID: String(getMySmallID(opponent)),
+                  targetID: oppId,
                   troops: assaultTroops
                 });
               }), 400);
@@ -2852,13 +2989,14 @@
         const oppMax = getMaxTroops(game, opponent);
         const isOppKillShot = myTroops > oppTroops * 1.3 && troopRatio > dynamicReserve;
         const oppInDPRange = frontlineInDPRange(game, myPlayer, opponent);
-        if (this.justLandedBeachhead && now - this.lastLandingAssaultTime < 4e3) {
+        const oppId = getPlayerID(opponent);
+        if (this.justLandedBeachhead && now - this.lastLandingAssaultTime < 4e3 && oppId) {
           this.justLandedBeachhead = false;
           if (!isOppKillShot) {
             const assaultTroops = Math.floor(myTroops * .45);
             const ok = sendPacket({
               type: "attack",
-              targetID: String(getMySmallID(opponent)),
+              targetID: oppId,
               troops: assaultTroops
             });
             if (ok) {
@@ -2871,11 +3009,11 @@
             }
           }
         }
-        if (isOppKillShot) {
+        if (isOppKillShot && oppId) {
           const killTroops = Math.floor(myTroops * .9);
           const ok = sendPacket({
             type: "attack",
-            targetID: String(getMySmallID(opponent)),
+            targetID: oppId,
             troops: killTroops
           });
           if (ok) {
@@ -2932,13 +3070,14 @@
       sendEmojiTo(target, emojiIndex) {
         if (botCfg.autoEmoji !== true) return false;
         const now = Date.now();
-        const tId = typeof target === "string" ? target : typeof target?.id === "function" ? target.id() : target?.id || "AllPlayers";
-        const last = this.lastEmojiSentTime.get(String(tId)) || 0;
+        const recipient = target === "AllPlayers" ? "AllPlayers" : getPlayerID(target);
+        if (!recipient) return false;
+        const last = this.lastEmojiSentTime.get(recipient) || 0;
         if (now - last < 4e3) return false;
-        this.lastEmojiSentTime.set(String(tId), now);
+        this.lastEmojiSentTime.set(recipient, now);
         return sendPacket({
           type: "emoji",
-          recipient: String(tId),
+          recipient: recipient,
           emoji: Number.isInteger(emojiIndex) ? emojiIndex : EMOJI_IDX.HEART
         });
       }
@@ -2948,7 +3087,7 @@
       panel.style.fontFamily = "monospace";
       panel.style.fontSize = "11px";
       const themeColor = api.cfg?.guiColor || "#00ff66";
-      panel.innerHTML = `\n        <button id="blon-ext-auto-master-toggle" style="width:100%;padding:9px 0;background:${themeColor};border:none;color:#000;font-weight:700;font-size:11px;border-radius:4px;cursor:pointer;margin-bottom:10px;transition:all 0.2s ease;">\n            ENABLE AUTOPLAY (Shift+B)\n        </button>\n\n        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">\n            <span style="color:#aaa;font-size:10px;font-weight:700;">STRATEGY PRESET</span>\n            <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:3px 6px;cursor:pointer;">\n                <option value="v1v1" ${botCfg.activePreset === "v1v1" || botCfg.mode === "1v1" ? "selected" : ""}>1v1 Sweaty Meta</option>\n                <option value="solo" ${botCfg.activePreset === "solo" || botCfg.mode === "solo" ? "selected" : ""}>Solo Impossible AI</option>\n            </select>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-bottom:8px;">Combat & Expansion</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Attack & Target Priority\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-expand" ${botCfg.autoExpand !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Expand (Land & Fallout Grab)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Defend (Frontline DP Placement)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Spawn (Optimal Density Scoring)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;margin-left:14px;">\n            <input type="checkbox" id="blon-ext-feat-pred-spawn" ${botCfg.usePredeterminedSpawns !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Use Predetermined 1v1 Spawns\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Boat (Surge Beachhead & Islands)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-warship" ${botCfg.autoWarship !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Warships (Retaliation & Intercept)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-alliance" ${botCfg.autoAlliance !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Alliances & Diplomatic Outreach\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-donate" ${botCfg.autoDonate !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Donate Troops to Allies in Combat\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-embargo" ${botCfg.autoEmbargo !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Embargo Hostiles & Attackers\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-winfixes" ${botCfg.winFixes !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Competitive Win-Fixes (Cadence & Scale)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Emoji Reactions\n        </label>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Structure & Defense</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-build-master" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Build Structures & Upgrades\n        </label>\n\n        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-cities" ${botCfg.buildCities !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Cities (Inland Spacing)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Cities</span>\n                <input id="blon-ext-max-cities-slider" type="range" min="1" max="50" step="1" value="${botCfg.maxCities ?? 40}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-cities-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxCities ?? 40}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-factories" ${botCfg.buildFactories !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Factories (Coastal Multiplier)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Factories</span>\n                <input id="blon-ext-max-factories-slider" type="range" min="0" max="30" step="1" value="${botCfg.maxFactories ?? 20}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-factories-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxFactories ?? 20}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-defposts" ${botCfg.buildDefensePosts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Defense Posts (Frontline Sampling)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Defense Posts</span>\n                <input id="blon-ext-max-defposts-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxDefensePosts ?? 5}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-defposts-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxDefensePosts ?? 5}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-silos" ${botCfg.buildSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Missile Silos (Protected under SAMs)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Silos</span>\n                <input id="blon-ext-max-silos-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxSilos ?? 3}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-silos-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSilos ?? 3}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> SAM Launchers (Air Defense Umbrella)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max SAMs</span>\n                <input id="blon-ext-max-sams-slider" type="range" min="0" max="20" step="1" value="${botCfg.maxSams ?? 8}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-sams-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSams ?? 8}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-ports" ${botCfg.buildPorts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Ports (Major Sea Bodies)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Ports</span>\n                <input id="blon-ext-max-ports-slider" type="range" min="0" max="6" step="1" value="${botCfg.maxPorts ?? 3}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-ports-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxPorts ?? 3}</span>\n            </div>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Nuclear Strikes & Superweapons</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-nuke" ${botCfg.autoNuke !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Nuke & Trajectory SAM Evasion\n        </label>\n        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-atom" ${botCfg.allowAtomBombs === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Atom Bombs / SAM Burn ($750K)\n            </label>\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Hydrogen Bombs ($5M)\n            </label>\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-mirv" ${botCfg.allowMirv !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> MIRV Victory Denial ($25M)\n            </label>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">AI Tuning</div>\n        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Attack Trigger Ratio</span>\n                <input id="blon-ext-trigger-slider" type="range" min="30" max="90" step="1" value="${Math.round((botCfg.triggerRatio ?? .55) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-trigger-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.triggerRatio ?? .55) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Troop Reserve Floor</span>\n                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? .35) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-reserve-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.reserveRatio ?? .35) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Wilderness Expand Floor</span>\n                <input id="blon-ext-expand-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.expandRatio ?? .15) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-expand-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.expandRatio ?? .15) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Bot Parallel Cap</span>\n                <input id="blon-ext-parallel-slider" type="range" min="1" max="100" step="1" value="${botCfg.botParallelism ?? 100}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-parallel-value" style="color:#ffcc00;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.botParallelism ?? 100}</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">AI Tick Interval</span>\n                <input id="blon-ext-interval-slider" type="range" min="200" max="2500" step="50" value="${botCfg.tickIntervalMs ?? 300}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-interval-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.tickIntervalMs ?? 300}ms</span>\n            </div>\n        </div>\n      `;
+      panel.innerHTML = `\n        <button id="blon-ext-auto-master-toggle" style="width:100%;padding:9px 0;background:${themeColor};border:none;color:#000;font-weight:700;font-size:11px;border-radius:4px;cursor:pointer;margin-bottom:10px;transition:all 0.2s ease;">\n            ENABLE AUTOPLAY (Shift+B)\n        </button>\n\n        <div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">\n            <span style="color:#aaa;font-size:10px;font-weight:700;">STRATEGY PRESET</span>\n            <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:3px 6px;cursor:pointer;">\n                <option value="v1v1" ${botCfg.activePreset === "v1v1" || botCfg.mode === "1v1" ? "selected" : ""}>1v1 Sweaty Meta</option>\n                <option value="solo" ${botCfg.activePreset === "solo" || botCfg.mode === "solo" ? "selected" : ""}>Solo Impossible AI</option>\n            </select>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-bottom:8px;">Combat & Expansion</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-attack" ${botCfg.autoAttack !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Attack & Target Priority\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-expand" ${botCfg.autoExpand !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Expand (Land & Fallout Grab)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-defend" ${botCfg.autoDefend !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Defend (Frontline DP Placement)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-spawn" ${botCfg.autoSpawn !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Spawn (Dynamic Team/Terrain Scoring)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;margin-left:14px;">\n            <input type="checkbox" id="blon-ext-feat-pred-spawn" ${botCfg.usePredeterminedSpawns !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Use Predetermined 1v1 Spawns\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-boat" ${botCfg.autoBoat !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Boat (Surge Beachhead & Islands)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-warship" ${botCfg.autoWarship !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Warships (Retaliation & Intercept)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-alliance" ${botCfg.autoAlliance !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Alliances & Diplomatic Outreach\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-donate" ${botCfg.autoDonate !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Donate Troops to Allies in Combat\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-embargo" ${botCfg.autoEmbargo !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Embargo Hostiles & Attackers\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-winfixes" ${botCfg.winFixes !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Competitive Win-Fixes (Cadence & Scale)\n        </label>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Emoji Reactions\n        </label>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Structure & Defense</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-build-master" ${botCfg.autoBuild !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Build Structures & Upgrades\n        </label>\n\n        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-cities" ${botCfg.buildCities !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Cities (Inland Spacing)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Cities</span>\n                <input id="blon-ext-max-cities-slider" type="range" min="1" max="50" step="1" value="${botCfg.maxCities ?? 40}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-cities-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxCities ?? 40}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-factories" ${botCfg.buildFactories !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Factories (Coastal Multiplier)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Factories</span>\n                <input id="blon-ext-max-factories-slider" type="range" min="0" max="30" step="1" value="${botCfg.maxFactories ?? 20}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-factories-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxFactories ?? 20}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-defposts" ${botCfg.buildDefensePosts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Defense Posts (Frontline Sampling)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Defense Posts</span>\n                <input id="blon-ext-max-defposts-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxDefensePosts ?? 5}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-defposts-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxDefensePosts ?? 5}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-silos" ${botCfg.buildSilos !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Missile Silos (Protected under SAMs)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Silos</span>\n                <input id="blon-ext-max-silos-slider" type="range" min="0" max="10" step="1" value="${botCfg.maxSilos ?? 3}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-silos-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSilos ?? 3}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-sams" ${botCfg.buildSams !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> SAM Launchers (Air Defense Umbrella)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max SAMs</span>\n                <input id="blon-ext-max-sams-slider" type="range" min="0" max="20" step="1" value="${botCfg.maxSams ?? 8}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-sams-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxSams ?? 8}</span>\n            </div>\n\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-build-ports" ${botCfg.buildPorts !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Ports (Major Sea Bodies)\n            </label>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;margin-left:14px;margin-bottom:4px;">\n                <span style="font-size:10px;">Max Ports</span>\n                <input id="blon-ext-max-ports-slider" type="range" min="0" max="6" step="1" value="${botCfg.maxPorts ?? 3}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-max-ports-val" style="color:#ffcc00;font-size:10px;min-width:24px;text-align:right;font-weight:700;">${botCfg.maxPorts ?? 3}</span>\n            </div>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Nuclear Strikes & Superweapons</div>\n        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">\n            <input type="checkbox" id="blon-ext-feat-nuke" ${botCfg.autoNuke !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Nuke & Trajectory SAM Evasion\n        </label>\n        <div style="margin-left:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px;">\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-atom" ${botCfg.allowAtomBombs === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Atom Bombs / SAM Burn ($750K)\n            </label>\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Hydrogen Bombs ($5M)\n            </label>\n            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">\n                <input type="checkbox" id="blon-ext-nuke-mirv" ${botCfg.allowMirv !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> MIRV Victory Denial ($25M)\n            </label>\n        </div>\n\n        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">AI Tuning</div>\n        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Attack Trigger Ratio</span>\n                <input id="blon-ext-trigger-slider" type="range" min="30" max="90" step="1" value="${Math.round((botCfg.triggerRatio ?? .55) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-trigger-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.triggerRatio ?? .55) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Troop Reserve Floor</span>\n                <input id="blon-ext-reserve-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.reserveRatio ?? .35) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-reserve-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.reserveRatio ?? .35) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Wilderness Expand Floor</span>\n                <input id="blon-ext-expand-slider" type="range" min="10" max="70" step="1" value="${Math.round((botCfg.expandRatio ?? .15) * 100)}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-expand-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${Math.round((botCfg.expandRatio ?? .15) * 100)}%</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">Bot Parallel Cap</span>\n                <input id="blon-ext-parallel-slider" type="range" min="1" max="100" step="1" value="${botCfg.botParallelism ?? 100}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-parallel-value" style="color:#ffcc00;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.botParallelism ?? 100}</span>\n            </div>\n            <div style="display:flex;align-items:center;gap:8px;color:#aaa;font-size:11px;">\n                <span style="min-width:130px;font-size:10px;">AI Tick Interval</span>\n                <input id="blon-ext-interval-slider" type="range" min="200" max="2500" step="50" value="${botCfg.tickIntervalMs ?? 300}" style="flex:1;cursor:pointer;">\n                <span id="blon-ext-interval-value" style="color:#00ff66;font-size:10px;min-width:32px;text-align:right;font-weight:700;">${botCfg.tickIntervalMs ?? 300}ms</span>\n            </div>\n        </div>\n      `;
       const masterBtn = panel.querySelector("#blon-ext-auto-master-toggle");
       if (masterBtn) masterBtn.addEventListener("click", (() => Engine.toggle()));
       const modeSelect = panel.querySelector("#blon-ext-mode-select");
@@ -3019,7 +3158,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.3.1",
+      version: "4.3.3",
       description: "Advanced Autonomous Autoplay Extension for Project Blon",
       author: "blon",
       tabLabel: "Auto",
