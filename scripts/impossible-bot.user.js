@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      4.3.0
+// @version      4.3.1
 // @description  Advanced Autonomous Autoplay Extension for Project Blon
 // @author       blon
 // @match        *://openfront.io/*
@@ -190,17 +190,17 @@
       setCb("blon-ext-nuke-atom", botCfg.allowAtomBombs);
       setCb("blon-ext-nuke-hbomb", botCfg.allowHydrogenBombs);
       setCb("blon-ext-nuke-mirv", botCfg.allowMirv);
-      setSlider("blon-ext-max-cities-slider", "blon-ext-max-cities-val", botCfg.maxCities ?? 3);
-      setSlider("blon-ext-max-factories-slider", "blon-ext-max-factories-val", botCfg.maxFactories ?? 0);
-      setSlider("blon-ext-max-defposts-slider", "blon-ext-max-defposts-val", botCfg.maxDefensePosts ?? 4);
-      setSlider("blon-ext-max-silos-slider", "blon-ext-max-silos-val", botCfg.maxSilos ?? 1);
-      setSlider("blon-ext-max-sams-slider", "blon-ext-max-sams-val", botCfg.maxSams ?? 0);
-      setSlider("blon-ext-max-ports-slider", "blon-ext-max-ports-val", botCfg.maxPorts ?? 0);
-      setSlider("blon-ext-trigger-slider", "blon-ext-trigger-value", Math.round((botCfg.triggerRatio ?? .5) * 100), "%");
-      setSlider("blon-ext-reserve-slider", "blon-ext-reserve-value", Math.round((botCfg.reserveRatio ?? .3) * 100), "%");
-      setSlider("blon-ext-expand-slider", "blon-ext-expand-value", Math.round((botCfg.expandRatio ?? .1) * 100), "%");
-      setSlider("blon-ext-parallel-slider", "blon-ext-parallel-value", botCfg.botParallelism ?? 60);
-      setSlider("blon-ext-interval-slider", "blon-ext-interval-value", botCfg.tickIntervalMs ?? 650, "ms");
+      setSlider("blon-ext-max-cities-slider", "blon-ext-max-cities-val", botCfg.maxCities ?? 40);
+      setSlider("blon-ext-max-factories-slider", "blon-ext-max-factories-val", botCfg.maxFactories ?? 20);
+      setSlider("blon-ext-max-defposts-slider", "blon-ext-max-defposts-val", botCfg.maxDefensePosts ?? 5);
+      setSlider("blon-ext-max-silos-slider", "blon-ext-max-silos-val", botCfg.maxSilos ?? 3);
+      setSlider("blon-ext-max-sams-slider", "blon-ext-max-sams-val", botCfg.maxSams ?? 8);
+      setSlider("blon-ext-max-ports-slider", "blon-ext-max-ports-val", botCfg.maxPorts ?? 3);
+      setSlider("blon-ext-trigger-slider", "blon-ext-trigger-value", Math.round((botCfg.triggerRatio ?? .55) * 100), "%");
+      setSlider("blon-ext-reserve-slider", "blon-ext-reserve-value", Math.round((botCfg.reserveRatio ?? .35) * 100), "%");
+      setSlider("blon-ext-expand-slider", "blon-ext-expand-value", Math.round((botCfg.expandRatio ?? .15) * 100), "%");
+      setSlider("blon-ext-parallel-slider", "blon-ext-parallel-value", botCfg.botParallelism ?? 100);
+      setSlider("blon-ext-interval-slider", "blon-ext-interval-value", botCfg.tickIntervalMs ?? 300, "ms");
     }
     function applyPreset(presetKey) {
       const p = PRESETS[presetKey];
@@ -263,6 +263,7 @@
       RAT: 59
     };
     function forEachNeighbor(game, tile, fn) {
+      if (!game || tile == null) return;
       if (typeof game.forEachNeighbor === "function") {
         game.forEachNeighbor(tile, fn);
       } else if (typeof game.neighbors === "function") {
@@ -273,9 +274,15 @@
       }
     }
     function getMySmallID(myPlayer) {
-      return typeof myPlayer.smallID === "function" ? myPlayer.smallID() : null;
+      if (!myPlayer) return null;
+      try {
+        return typeof myPlayer.smallID === "function" ? myPlayer.smallID() : myPlayer.smallID ?? null;
+      } catch (e) {
+        return null;
+      }
     }
     function getBorderTiles(game, myPlayer) {
+      if (!game || !myPlayer) return new Set;
       try {
         if (typeof myPlayer.borderTiles === "function") {
           const res = myPlayer.borderTiles();
@@ -296,30 +303,26 @@
       if (!myID || !game) return new Set;
       const set = new Set;
       try {
-        if (typeof game.forEachTile === "function") {
-          game.forEachTile((tile => {
-            try {
-              if (game.ownerID(tile) === myID) {
-                let isBorder = false;
-                forEachNeighbor(game, tile, (n => {
-                  if (isBorder) return;
-                  try {
-                    if (!game.isLand(n) || game.ownerID(n) !== myID) {
-                      isBorder = true;
-                    }
-                  } catch (e) {}
-                }));
-                if (isBorder) set.add(tile);
-              }
-            } catch (e) {}
-          }));
+        if (typeof myPlayer.tiles === "function") {
+          const allTiles = myPlayer.tiles();
+          const list = Array.isArray(allTiles) ? allTiles : allTiles instanceof Set ? Array.from(allTiles) : [];
+          for (const tile of list) {
+            let isBorder = false;
+            forEachNeighbor(game, tile, (n => {
+              if (isBorder) return;
+              try {
+                if (!game.isLand(n) || game.ownerID(n) !== myID) isBorder = true;
+              } catch (e) {}
+            }));
+            if (isBorder) set.add(tile);
+          }
         }
       } catch (e) {}
       return set;
     }
     function getBorderingPlayerIDs(game, myPlayer) {
       const myID = getMySmallID(myPlayer);
-      if (!myID) return new Map;
+      if (!myID || !game) return new Map;
       const map = new Map;
       const bts = getBorderTiles(game, myPlayer);
       const scanNeighbors = tile => {
@@ -333,15 +336,7 @@
           } catch (e) {}
         }));
       };
-      if (bts.size > 0) {
-        for (const tile of bts) scanNeighbors(tile);
-      } else if (typeof game.forEachTile === "function") {
-        game.forEachTile((tile => {
-          try {
-            if (game.ownerID(tile) === myID) scanNeighbors(tile);
-          } catch (e) {}
-        }));
-      }
+      for (const tile of bts) scanNeighbors(tile);
       return map;
     }
     function hasBorderWithTerraNullius(game, myPlayer) {
@@ -367,6 +362,7 @@
       return false;
     }
     function getMaxTroops(game, player) {
+      if (!game || !player) return 1e3;
       try {
         const cfg = typeof game.config === "function" ? game.config() : null;
         if (cfg && typeof cfg.maxTroops === "function") return Number(cfg.maxTroops(player)) || 1e3;
@@ -374,22 +370,25 @@
       return 1e3;
     }
     function playerTroops(p) {
+      if (!p) return 0;
       try {
-        const t = typeof p.troops === "function" ? p.troops() : 0;
+        const t = typeof p.troops === "function" ? p.troops() : p.troops || 0;
         return typeof t === "bigint" ? Number(t) : Number(t || 0);
       } catch (e) {
         return 0;
       }
     }
     function playerGold(p) {
+      if (!p) return 0;
       try {
-        const g = typeof p.gold === "function" ? p.gold() : 0;
+        const g = typeof p.gold === "function" ? p.gold() : p.gold || 0;
         return typeof g === "bigint" ? Number(g) : Number(g || 0);
       } catch (e) {
         return 0;
       }
     }
     function playerType(p) {
+      if (!p) return "";
       try {
         return typeof p.type === "function" ? p.type() : p.type || "";
       } catch (e) {
@@ -397,10 +396,12 @@
       }
     }
     function isBot(p) {
+      if (!p) return false;
       const t = playerType(p);
       return t === "BOT" || t === "NATION" || t === "Bot" || t === 2;
     }
     function isAlive(p) {
+      if (!p) return false;
       try {
         return typeof p.isAlive === "function" ? p.isAlive() : true;
       } catch (e) {
@@ -431,6 +432,7 @@
       return false;
     }
     function getPlayerName(p) {
+      if (!p) return "Unknown";
       if (typeof api.getPlayerName === "function") return api.getPlayerName(p);
       try {
         return typeof p.displayName === "function" ? p.displayName() : typeof p.name === "function" ? p.name() : "Unknown";
@@ -439,6 +441,7 @@
       }
     }
     function getAllPlayers(game) {
+      if (!game) return [];
       try {
         if (typeof api.getGamePlayers === "function") return api.getGamePlayers(game) || [];
         if (typeof game.players === "function") return game.players() || [];
@@ -446,6 +449,7 @@
       return [];
     }
     function playerOwnsStructures(p) {
+      if (!p) return false;
       try {
         const units = typeof p.units === "function" ? p.units() : [];
         return units && units.length > 0;
@@ -454,40 +458,48 @@
       }
     }
     function playerUnits(p) {
+      if (!p) return [];
       try {
-        return typeof p.units === "function" ? p.units() : [];
+        return typeof p.units === "function" ? p.units() : p.units || [];
       } catch (e) {
         return [];
       }
     }
     function unitType(u) {
+      if (!u) return "";
       try {
-        return typeof u.type === "function" ? u.type() : u.type;
+        return typeof u.type === "function" ? u.type() : u.type || "";
       } catch (e) {
         return "";
       }
     }
     function calcTileDist(game, t1, t2) {
+      if (t1 == null || t2 == null || !game) return Infinity;
       try {
-        const w = typeof game.width === "function" ? game.width() : 500;
+        const w = typeof game.width === "function" ? game.width() : game.width || 500;
         const x1 = t1 % w, y1 = Math.floor(t1 / w);
         const x2 = t2 % w, y2 = Math.floor(t2 / w);
         return Math.hypot(x1 - x2, y1 - y2);
       } catch (e) {
-        return 0;
+        return Infinity;
       }
     }
     function getPlayerCenter(game, player) {
+      if (!game || !player) return null;
       try {
-        const w = typeof game.width === "function" ? game.width() : 500;
+        const w = typeof game.width === "function" ? game.width() : game.width || 500;
+        const st = typeof player.spawnTile === "function" ? player.spawnTile() : player.spawnTile;
+        if (st != null && typeof st === "number" && st >= 0) {
+          return {
+            x: st % w,
+            y: Math.floor(st / w)
+          };
+        }
         const bts = getBorderTiles(game, player);
         const arr = Array.from(bts);
-        if (arr.length === 0) return {
-          x: 0,
-          y: 0
-        };
+        if (arr.length === 0) return null;
         let sx = 0, sy = 0;
-        const sample = Math.min(arr.length, 30);
+        const sample = Math.min(arr.length, 20);
         for (let i = 0; i < sample; i++) {
           const t = arr[Math.floor(i * arr.length / sample)];
           sx += t % w;
@@ -498,15 +510,13 @@
           y: sy / sample
         };
       } catch (e) {
-        return {
-          x: 0,
-          y: 0
-        };
+        return null;
       }
     }
     function getInteriorTiles(game, myPlayer) {
+      if (!game || !myPlayer) return [];
       const myID = getMySmallID(myPlayer);
-      if (!myID || !game) return [];
+      if (!myID) return [];
       const bts = getBorderTiles(game, myPlayer);
       const interiors = [];
       try {
@@ -518,19 +528,11 @@
           }
           if (interiors.length > 0) return interiors;
         }
-        if (typeof game.forEachTile === "function") {
-          game.forEachTile((tile => {
-            try {
-              if (game.ownerID(tile) === myID && !bts.has(tile)) {
-                interiors.push(tile);
-              }
-            } catch (e) {}
-          }));
-        }
       } catch (e) {}
       return interiors.length > 0 ? interiors : Array.from(bts);
     }
     function findInteriorTile(game, myPlayer) {
+      if (!game || !myPlayer) return null;
       const ints = getInteriorTiles(game, myPlayer);
       if (ints.length > 0) {
         return ints[Math.floor(Math.random() * ints.length)];
@@ -539,21 +541,28 @@
       return bts[Math.floor(bts.length / 2)] || null;
     }
     function findOwnedShoreTile(game, myPlayer) {
+      if (!game || !myPlayer) return null;
       const bts = getBorderTiles(game, myPlayer);
       for (const t of bts) {
-        if (typeof game.isShore === "function" && game.isShore(t)) return t;
+        try {
+          if (typeof game.isShore === "function" && game.isShore(t)) return t;
+        } catch (e) {}
       }
       return null;
     }
     function findTargetShoreTile(game, target) {
+      if (!game || !target) return null;
       const bts = getBorderTiles(game, target);
       for (const t of bts) {
-        if (typeof game.isShore === "function" && game.isShore(t)) return t;
+        try {
+          if (typeof game.isShore === "function" && game.isShore(t)) return t;
+        } catch (e) {}
       }
       const arr = Array.from(bts);
       return arr[0] || null;
     }
     function findTargetCityTile(target) {
+      if (!target) return null;
       const units = playerUnits(target);
       for (const u of units) {
         const t = unitType(u);
@@ -565,23 +574,26 @@
       return null;
     }
     function euclideanDist(game, t1, t2) {
-      if (typeof game.euclideanDist === "function") return game.euclideanDist(t1, t2);
-      const w = typeof game.width === "function" ? game.width() : 500;
+      if (t1 == null || t2 == null) return Infinity;
+      if (typeof game?.euclideanDist === "function") return game.euclideanDist(t1, t2);
+      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
       const x1 = t1 % w, y1 = Math.floor(t1 / w);
       const x2 = t2 % w, y2 = Math.floor(t2 / w);
       return Math.hypot(x1 - x2, y1 - y2);
     }
     function euclideanDistSquared(game, t1, t2) {
-      if (typeof game.euclideanDistSquared === "function") return game.euclideanDistSquared(t1, t2);
-      const w = typeof game.width === "function" ? game.width() : 500;
+      if (t1 == null || t2 == null) return Infinity;
+      if (typeof game?.euclideanDistSquared === "function") return game.euclideanDistSquared(t1, t2);
+      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
       const x1 = t1 % w, y1 = Math.floor(t1 / w);
       const x2 = t2 % w, y2 = Math.floor(t2 / w);
       const dx = x1 - x2, dy = y1 - y2;
       return dx * dx + dy * dy;
     }
     function manhattanDist(game, t1, t2) {
-      if (typeof game.manhattanDist === "function") return game.manhattanDist(t1, t2);
-      const w = typeof game.width === "function" ? game.width() : 500;
+      if (t1 == null || t2 == null) return Infinity;
+      if (typeof game?.manhattanDist === "function") return game.manhattanDist(t1, t2);
+      const w = typeof game?.width === "function" ? game.width() : game?.width || 500;
       const x1 = t1 % w, y1 = Math.floor(t1 / w);
       const x2 = t2 % w, y2 = Math.floor(t2 / w);
       return Math.abs(x1 - x2) + Math.abs(y1 - y2);
@@ -629,28 +641,6 @@
         result.push(pool[Math.floor(Math.random() * pool.length)]);
       }
       return result;
-    }
-    function boundingBoxTiles(game, centerTile, radius) {
-      if (centerTile == null) return [];
-      const w = typeof game.width === "function" ? game.width() : 500;
-      const h = typeof game.height === "function" ? game.height() : 500;
-      const cx = centerTile % w;
-      const cy = Math.floor(centerTile / w);
-      const r = Math.ceil(radius);
-      const r2 = radius * radius;
-      const tiles = [];
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) {
-          if (dx * dx + dy * dy <= r2) {
-            const nx = cx + dx;
-            const ny = cy + dy;
-            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-              tiles.push(ny * w + nx);
-            }
-          }
-        }
-      }
-      return tiles;
     }
     const OppTracker = {
       samples: [],
@@ -1979,7 +1969,6 @@
           return false;
         },
         nukeTileScore(game, target, tile, nukeType, mySilos) {
-          const w = typeof game.width === "function" ? game.width() : 500;
           const radius = nukeType === "Hydrogen Bomb" ? 60 : 25;
           const units = playerUnits(target);
           let score = 0;
@@ -2109,7 +2098,7 @@
         handleAlliances(game, myPlayer) {
           if (!botCfg.autoAlliance) return;
           try {
-            const requests = typeof myPlayer.incomingAllianceRequests === "function" ? myPlayer.incomingAllianceRequests() : [];
+            const requests = typeof myPlayer?.incomingAllianceRequests === "function" ? myPlayer.incomingAllianceRequests() : [];
             for (const req of requests) {
               const requestor = typeof req.requestor === "function" ? req.requestor() : req.requestor;
               if (!requestor || isBot(requestor)) {
@@ -2143,71 +2132,110 @@
           }
         },
         handleEmbargos(game, myPlayer) {
-          if (!botCfg.autoEmbargo) return;
-          const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
-          for (const atk of incoming) {
-            const attacker = typeof atk.attacker === "function" ? atk.attacker() : atk.attacker;
-            if (attacker && !isFriendly(myPlayer, attacker)) {
-              const aId = typeof attacker.id === "function" ? attacker.id() : attacker.id;
-              if (aId) sendPacket({
-                type: "embargo",
-                targetID: String(aId),
-                action: "start"
-              });
+          if (!botCfg.autoEmbargo || !myPlayer) return;
+          try {
+            const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
+            for (const atk of incoming) {
+              const attacker = typeof atk.attacker === "function" ? atk.attacker() : atk.attacker;
+              if (attacker && !isFriendly(myPlayer, attacker)) {
+                const aId = typeof attacker.id === "function" ? attacker.id() : attacker.id;
+                if (aId) sendPacket({
+                  type: "embargo",
+                  targetID: String(aId),
+                  action: "start"
+                });
+              }
             }
-          }
+          } catch (e) {}
         }
       },
       Spawn: {
         pickSpawnTile(game, myPlayer) {
-          const w = typeof game.width === "function" ? game.width() : 500;
-          const h = typeof game.height === "function" ? game.height() : 500;
-          const allPlayers = getAllPlayers(game);
-          const spawnedPlayers = allPlayers.filter((p => {
-            try {
-              return typeof p.hasSpawned === "function" && p.hasSpawned() && getMySmallID(p) !== getMySmallID(myPlayer);
-            } catch (e) {
-              return false;
+          try {
+            if (!game) return null;
+            const width = typeof game.width === "function" ? game.width() : game.width || 500;
+            const height = typeof game.height === "function" ? game.height() : game.height || 500;
+            const myID = getMySmallID(myPlayer);
+            const allPlayers = getAllPlayers(game);
+            const spawnedCoords = [];
+            for (const p of allPlayers) {
+              if (!p) continue;
+              try {
+                const pID = getMySmallID(p);
+                if (myID != null && pID === myID) continue;
+                const st = typeof p.spawnTile === "function" ? p.spawnTile() : p.spawnTile;
+                if (st != null && typeof st === "number" && st >= 0) {
+                  const sx = typeof game.x === "function" ? game.x(st) : st % width;
+                  const sy = typeof game.y === "function" ? game.y(st) : Math.floor(st / width);
+                  if (Number.isFinite(sx) && Number.isFinite(sy)) {
+                    spawnedCoords.push({
+                      x: sx,
+                      y: sy
+                    });
+                  }
+                }
+              } catch (e) {}
             }
-          }));
-          let bestTile = null;
-          let bestScore = -Infinity;
-          for (let sample = 0; sample < 300; sample++) {
-            const x = Math.floor(Math.random() * (w - 40)) + 20;
-            const y = Math.floor(Math.random() * (h - 40)) + 20;
-            const tile = y * w + x;
-            try {
-              if (!game.isLand(tile) || typeof game.hasOwner === "function" && game.hasOwner(tile)) continue;
-            } catch (e) {
-              continue;
-            }
-            let landCount = 0;
-            let shoreNear = false;
-            for (let dy = -12; dy <= 12; dy += 3) {
-              for (let dx = -12; dx <= 12; dx += 3) {
-                const nTile = (y + dy) * w + (x + dx);
-                try {
-                  if (game.isLand(nTile)) landCount++;
-                  if (typeof game.isShore === "function" && game.isShore(nTile)) shoreNear = true;
-                } catch (e) {}
+            let bestTile = null;
+            let bestScore = -Infinity;
+            for (let i = 0; i < 40; i++) {
+              const rx = Math.floor(Math.random() * (width - 30)) + 15;
+              const ry = Math.floor(Math.random() * (height - 30)) + 15;
+              if (typeof game.isValidCoord === "function" && !game.isValidCoord(rx, ry)) continue;
+              const ref = typeof game.ref === "function" ? game.ref(rx, ry) : ry * width + rx;
+              if (ref == null || ref < 0) continue;
+              try {
+                if (typeof game.isValidRef === "function" && !game.isValidRef(ref)) continue;
+                if (typeof game.isLand === "function" && !game.isLand(ref)) continue;
+                if (typeof game.hasOwner === "function" && game.hasOwner(ref)) continue;
+                if (typeof game.isBorder === "function" && game.isBorder(ref)) continue;
+                if (typeof game.isImpassable === "function" && game.isImpassable(ref)) continue;
+              } catch (e) {
+                continue;
+              }
+              let landCount = 0;
+              let shoreNear = false;
+              for (let dy = -10; dy <= 10; dy += 5) {
+                for (let dx = -10; dx <= 10; dx += 5) {
+                  const nx = rx + dx, ny = ry + dy;
+                  if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    const nTile = typeof game.ref === "function" ? game.ref(nx, ny) : ny * width + nx;
+                    try {
+                      if (game.isLand(nTile)) landCount++;
+                      if (typeof game.isShore === "function" && game.isShore(nTile)) shoreNear = true;
+                    } catch (e) {}
+                  }
+                }
+              }
+              let minDist = Infinity;
+              for (const loc of spawnedCoords) {
+                const d = Math.hypot(rx - loc.x, ry - loc.y);
+                if (d < minDist) minDist = d;
+              }
+              const distFromEdge = Math.min(rx, width - rx, ry, height - ry);
+              const score = landCount * 3 + (shoreNear ? 12 : 0) + Math.min(80, minDist) * 1.5 + distFromEdge * .2 + Math.random() * 5;
+              if (score > bestScore) {
+                bestScore = score;
+                bestTile = ref;
               }
             }
-            let minDistToPlayer = Infinity;
-            for (const sp of spawnedPlayers) {
-              const center = getPlayerCenter(game, sp);
-              if (center) {
-                const dist = Math.hypot(x - center.x, y - center.y);
-                if (dist < minDistToPlayer) minDistToPlayer = dist;
+            if (bestTile == null) {
+              for (let i = 0; i < 50; i++) {
+                const rx = Math.floor(Math.random() * width);
+                const ry = Math.floor(Math.random() * height);
+                const ref = typeof game.ref === "function" ? game.ref(rx, ry) : ry * width + rx;
+                if (ref != null) {
+                  try {
+                    if (game.isLand(ref) && !game.hasOwner(ref)) return ref;
+                  } catch (e) {}
+                }
               }
             }
-            const distFromEdge = Math.min(x, w - x, y, h - y);
-            const score = landCount * 2 + (shoreNear ? 15 : 0) + Math.min(100, minDistToPlayer) * 1.5 + distFromEdge * .2;
-            if (score > bestScore) {
-              bestScore = score;
-              bestTile = tile;
-            }
+            return bestTile;
+          } catch (err) {
+            console.error("[ImpossibleBot] Spawn pick error:", err);
+            return null;
           }
-          return bestTile;
         }
       }
     };
@@ -2275,7 +2303,7 @@
       scheduleNextTick() {
         if (!this.running) return;
         if (this.timer) clearTimeout(this.timer);
-        const interval = Math.max(200, Math.min(3e3, botCfg.tickIntervalMs || 350));
+        const interval = Math.max(200, Math.min(3e3, botCfg.tickIntervalMs || 300));
         this.timer = setTimeout((() => {
           try {
             this.tick();
@@ -2293,14 +2321,21 @@
           return;
         }
         const game = state.game;
-        const inSpawn = typeof game.inSpawnPhase === "function" && game.inSpawnPhase();
+        let inSpawn = false;
+        try {
+          inSpawn = typeof game.inSpawnPhase === "function" && game.inSpawnPhase();
+        } catch (e) {}
         if (!inSpawn && this.spawnSent) {
           this.spawnSent = false;
           this.lastSpawnTile = null;
         }
         if (inSpawn) {
           if (botCfg.autoSpawn) {
-            this.handleAutoSpawn(game);
+            try {
+              this.handleAutoSpawn(game);
+            } catch (e) {
+              console.error("[ImpossibleBot] AutoSpawn error:", e);
+            }
           }
           updateUI();
           return;
@@ -2363,7 +2398,7 @@
         if (botCfg.autoEmoji === true) this.handleEmojis(game, myPlayer);
       },
       handle1v1AutoEmbargo(game, myPlayer) {
-        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
+        const incoming = typeof myPlayer?.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
         for (const atk of incoming) {
           if (!atk) continue;
           const attacker = typeof atk.attacker === "function" ? atk.attacker() : null;
@@ -2405,7 +2440,8 @@
         const myID = getMySmallID(myPlayer);
         const humanOpponents = all.filter((p => {
           if (!p || !isAlive(p)) return false;
-          if (getMySmallID(p) === myID || isFriendly(myPlayer, p)) return false;
+          if (myID != null && getMySmallID(p) === myID) return false;
+          if (isFriendly(myPlayer, p)) return false;
           const pType = typeof p.type === "function" ? p.type() : p.type || "";
           return pType !== "BOT" && pType !== "NATION" && !isBot(p);
         }));
@@ -2415,7 +2451,7 @@
         }
         const anyOpponents = all.filter((p => {
           if (!p || !isAlive(p)) return false;
-          return getMySmallID(p) !== myID && !isFriendly(myPlayer, p);
+          return (myID == null || getMySmallID(p) !== myID) && !isFriendly(myPlayer, p);
         }));
         anyOpponents.sort(((a, b) => playerTroops(b) - playerTroops(a)));
         return anyOpponents[0] || null;
@@ -2429,7 +2465,7 @@
         if (this.spawnSent && this.lastSpawnTile === tile) return;
         const ok = sendPacket({
           type: "spawn",
-          tile: tile
+          tile: Number(tile)
         });
         if (ok) {
           this.spawnSent = true;
@@ -2438,6 +2474,7 @@
         }
       },
       pickSpawnTile(game) {
+        if (!game) return null;
         const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1";
         if (is1v1 && botCfg.usePredeterminedSpawns !== false) {
           let mapName = "";
@@ -2445,7 +2482,7 @@
             if (typeof game.mapName === "function") mapName = game.mapName() || "";
             if (!mapName && typeof game.config === "function") {
               const c = game.config();
-              if (typeof c.mapName === "function") mapName = c.mapName() || "";
+              if (c && typeof c.mapName === "function") mapName = c.mapName() || "";
             }
           } catch (e) {}
           const PRESET_SPAWNS = {
@@ -2453,24 +2490,27 @@
             britannia: [ 180, 210 ],
             baikal: [ 250, 260 ],
             deglaciatedantarctica: [ 310, 280 ],
-            world: [ 500, 420 ],
-            asia: [ 620, 380 ],
+            world: [ 350, 250 ],
+            asia: [ 400, 280 ],
             northamerica: [ 220, 240 ]
           };
           const key = Object.keys(PRESET_SPAWNS).find((k => mapName.toLowerCase().includes(k)));
           let targetTile = null;
           if (key) {
             const [x, y] = PRESET_SPAWNS[key];
-            const w = typeof game.width === "function" ? game.width() : 500;
-            targetTile = y * w + x;
+            const w = typeof game.width === "function" ? game.width() : game.width || 500;
+            const h = typeof game.height === "function" ? game.height() : game.height || 500;
+            if (x >= 0 && x < w && y >= 0 && y < h) {
+              targetTile = typeof game.ref === "function" ? game.ref(x, y) : y * w + x;
+            }
           }
           if (targetTile != null && targetTile >= 0) {
             try {
-              if (typeof game.isValidCoord === "function") {
-                const w = typeof game.width === "function" ? game.width() : 500;
-                if (game.isValidCoord(targetTile % w, Math.floor(targetTile / w)) && game.isLand(targetTile)) {
-                  return targetTile;
-                }
+              if (typeof game.isValidRef === "function" && game.isValidRef(targetTile) && game.isLand(targetTile)) {
+                return targetTile;
+              }
+              if (typeof game.isLand === "function" && game.isLand(targetTile)) {
+                return targetTile;
               }
             } catch (e) {}
           }
@@ -2816,19 +2856,21 @@
         return ImpossibleAI.Attack.attackBots(game, myPlayer, bots, Math.max(0, myTroops - maxTroops * (reserveRatio ?? .35)));
       },
       handleEmojis(game, myPlayer) {
-        if (botCfg.autoEmoji !== true) return;
+        if (botCfg.autoEmoji !== true || !myPlayer) return;
         const now = Date.now();
         if (now - this.lastGlobalEmojiTime < 3e3) return;
-        const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
-        if (incoming.length > 0) {
-          const totalInc = incoming.reduce(((s, a) => s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0))), 0);
-          const myTr = playerTroops(myPlayer);
-          if (totalInc >= myTr * 2.5) {
-            this.sendEmojiTo("AllPlayers", EMOJI_IDX.SKULL);
-            this.lastGlobalEmojiTime = now;
-            return;
+        try {
+          const incoming = typeof myPlayer.incomingAttacks === "function" ? myPlayer.incomingAttacks() : [];
+          if (incoming.length > 0) {
+            const totalInc = incoming.reduce(((s, a) => s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0))), 0);
+            const myTr = playerTroops(myPlayer);
+            if (totalInc >= myTr * 2.5) {
+              this.sendEmojiTo("AllPlayers", EMOJI_IDX.SKULL);
+              this.lastGlobalEmojiTime = now;
+              return;
+            }
           }
-        }
+        } catch (e) {}
       },
       sendEmojiTo(target, emojiIndex) {
         if (botCfg.autoEmoji !== true) return false;
@@ -2920,7 +2962,7 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.3.0",
+      version: "4.3.1",
       description: "Advanced Autonomous Autoplay Extension for Project Blon",
       author: "blon",
       tabLabel: "Auto",
