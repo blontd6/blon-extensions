@@ -267,7 +267,6 @@
       setCb("blon-ext-nuke-atom", botCfg.allowAtomBombs);
       setCb("blon-ext-nuke-hbomb", botCfg.allowHydrogenBombs);
 
-      // Diplomacy & Team
       setCb("blon-ext-feat-ally", botCfg.autoAlly);
       setCb("blon-ext-feat-accept-ally", botCfg.autoAcceptAlly);
       setCb("blon-ext-feat-renew-ally", botCfg.autoRenewAlly);
@@ -1284,8 +1283,7 @@
       lastGoldDonationTime: 0,
       lastTargetSyncTime: 0,
       lastBriberyTime: 0,
-      lastNukeDetonationTile: null,
-      lastNukeDetonationTime: 0,
+      trackedNukeTargets: new Map(),
       lastExpandMs: 0,
       lastAttackMs: 0,
       lastTeamAttackMs: 0,
@@ -1401,7 +1399,6 @@
         if (botCfg.autoEmbargo) this.handleAutoEmbargo(game, myPlayer);
         if (botCfg.autoEmoji === true) this.handleEmojis(game, myPlayer);
 
-        // Diplomacy, Donations & Team Coordination (Solo & Team modes)
         if (botCfg.mode !== "1v1") {
           this.handleAlliances(game, myPlayer);
           this.handleSmartDonations(game, myPlayer);
@@ -2414,29 +2411,58 @@
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
-            this.lastNukeDetonationTile = targetTile;
-            this.lastNukeDetonationTime = now;
+            this.trackedNukeTargets.set(targetTile, now);
             if (botCfg.autoEmoji === true) this.sendEmojiTo(target, EMOJI_IDX.RADIATION);
           }
         }
       },
 
       handlePostNukeBlitz(game, myPlayer) {
-        if (!this.lastNukeDetonationTile || !this.lastNukeDetonationTime) return;
+        const units = playerUnits(myPlayer);
+        const nukesInFlight = units.filter(u => {
+          const t = unitType(u);
+          return t === "Atom Bomb" || t === "Hydrogen Bomb" || t === "AtomBomb" || t === "HydrogenBomb";
+        });
+
+        for (const nuke of nukesInFlight) {
+          const tgt = typeof nuke.targetTile === "function" ? nuke.targetTile() : (nuke.targetTile ?? (typeof nuke.tileTarget === "function" ? nuke.tileTarget() : null));
+          if (tgt != null && !this.trackedNukeTargets.has(tgt)) {
+            this.trackedNukeTargets.set(tgt, Date.now());
+          }
+        }
+
+        if (this.trackedNukeTargets.size === 0) return;
+
         const now = Date.now();
-        const elapsed = now - this.lastNukeDetonationTime;
-        // Missile flight time is roughly 4-8 seconds
-        if (elapsed >= 4500 && elapsed <= 14000) {
-          const tile = this.lastNukeDetonationTile;
-          const myID = getMySmallID(myPlayer);
-          const owner = typeof game.ownerID === "function" ? game.ownerID(tile) : null;
-          if (owner !== myID) {
-            const myTr = playerTroops(myPlayer);
-            const maxTr = getMaxTroops(game, myPlayer);
-            if (myTr > maxTr * 0.25) {
+        const myID = getMySmallID(myPlayer);
+        const myTr = playerTroops(myPlayer);
+        const maxTr = getMaxTroops(game, myPlayer);
+
+        for (const [tile, launchTime] of this.trackedNukeTargets.entries()) {
+          const matchingNuke = nukesInFlight.find(u => {
+            const tgt = typeof u.targetTile === "function" ? u.targetTile() : (u.targetTile ?? (typeof u.tileTarget === "function" ? u.tileTarget() : null));
+            return tgt === tile;
+          });
+
+          let nukeLanded = false;
+          if (matchingNuke) {
+            const isReached = typeof matchingNuke.reachedTarget === "function" ? matchingNuke.reachedTarget() : false;
+            const isAct = typeof matchingNuke.isActive === "function" ? matchingNuke.isActive() : true;
+            if (isReached || !isAct) {
+              nukeLanded = true;
+            }
+          } else {
+            const hasFallout = typeof game.hasFallout === "function" ? game.hasFallout(tile) : false;
+            if (hasFallout || (now - launchTime > 2000)) {
+              nukeLanded = true;
+            }
+          }
+
+          if (nukeLanded) {
+            const owner = typeof game.ownerID === "function" ? game.ownerID(tile) : null;
+            if (owner !== myID && myTr > maxTr * 0.25) {
               const rushTroops = Math.floor(Math.min(myTr * 0.15, 100000));
               if (rushTroops >= 500) {
-                // If on coastal or island, dispatch boat; if land, normal attack
                 const isShore = typeof game.isShore === "function" && game.isShore(tile);
                 if (isShore && botCfg.autoBoat) {
                   sendPacket({ type: "boat", dst: tile, troops: rushTroops });
@@ -2445,10 +2471,9 @@
                 }
               }
             }
-          }
-          if (elapsed > 12000) {
-            this.lastNukeDetonationTile = null;
-            this.lastNukeDetonationTime = 0;
+            this.trackedNukeTargets.delete(tile);
+          } else if (now - launchTime > 35000) {
+            this.trackedNukeTargets.delete(tile);
           }
         }
       },
@@ -2486,7 +2511,6 @@
             continue;
           }
 
-          // Traitors are always rejected
           if (typeof requestor.isTraitor === "function" && requestor.isTraitor()) {
             if (typeof req.reject === "function") req.reject();
             continue;
@@ -2520,7 +2544,6 @@
         const bordering = getBorderingPlayerIDs(game, myPlayer);
         const enemies = Array.from(bordering.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
         
-        // Flank Securing: Propose alliance to strongest neighbor if fighting 2+ fronts
         if (enemies.length >= 2) {
           enemies.sort((a, b) => playerTroops(b) - playerTroops(a));
           const strongestEnemy = enemies[0];
@@ -2567,7 +2590,6 @@
           const partnerMax = getMaxTroops(game, partner);
           const partnerId = typeof partner.id === "function" ? partner.id() : partner.id;
 
-          // If ally has been crushed to <15% of troop cap and is weak, dissolve alliance to claim land
           if (partnerTr < partnerMax * 0.15 && partnerTr < myTr * 0.25 && partnerId) {
             sendPacket({ type: "breakAlliance", recipient: String(partnerId) });
             this.stats.alliancesBetrayed++;
@@ -2588,14 +2610,13 @@
 
         const myTr = playerTroops(myPlayer);
         const maxTr = getMaxTroops(game, myPlayer);
-        if (myTr < maxTr * 0.30) return; // Maintain own safety reserve
+        if (myTr < maxTr * 0.30) return;
 
         const all = getAllPlayers(game);
         const myID = getMySmallID(myPlayer);
         const teammates = all.filter(p => isAlive(p) && isFriendly(myPlayer, p) && getMySmallID(p) !== myID);
         if (teammates.length === 0) return;
 
-        // 1. Deficit Emergency Bailout (Teammates with incoming attacks)
         if (botCfg.autoDonateTroops) {
           for (const ally of teammates) {
             const incoming = typeof ally.incomingAttacks === "function" ? ally.incomingAttacks() : [];
@@ -2623,7 +2644,6 @@
           }
         }
 
-        // 2. Feeder Supply-Line Mode (Landlocked or near cap)
         if (botCfg.feederSupplyLine) {
           const bordering = getBorderingPlayerIDs(game, myPlayer);
           const enemies = Array.from(bordering.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
@@ -2665,7 +2685,6 @@
         const myID = getMySmallID(myPlayer);
         const teammates = all.filter(p => isAlive(p) && isFriendly(myPlayer, p) && getMySmallID(p) !== myID);
 
-        // 1. Silo / Nuke Financing
         if (botCfg.autoDonateGold && myGold >= 1000000) {
           for (const ally of teammates) {
             const units = playerUnits(ally);
@@ -2688,7 +2707,6 @@
           }
         }
 
-        // 2. City Bootstrapping for Teammates
         if (botCfg.autoDonateGold && myGold >= 400000) {
           for (const ally of teammates) {
             const units = playerUnits(ally);
@@ -2707,7 +2725,6 @@
           }
         }
 
-        // 3. AI Nation Bribery (Solo mode diplomacy)
         if (botCfg.aiBribery && botCfg.mode === "solo" && myGold >= 200000) {
           const bordering = getBorderingPlayerIDs(game, myPlayer);
           const aiNeighbors = Array.from(bordering.values()).filter(p => isAlive(p) && isBot(p) && !isFriendly(myPlayer, p));
@@ -2757,7 +2774,6 @@
         const borderingEnemies = borderingPlayers.filter(p => !isFriendly(myPlayer, p));
         borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
 
-        // 1. Attack bordering bots
         if (botCfg.autoAttack) {
           const borderingBots = borderingEnemies.filter(p => isBot(p));
           if (borderingBots.length > 0) {
@@ -2765,7 +2781,6 @@
           }
         }
 
-        // 2. Wilderness expansion
         if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
           const expandThrottle = 650;
           const now = Date.now();
@@ -2794,7 +2809,6 @@
         const now = Date.now();
         if (now - this.lastTeamAttackMs < 1000) return;
 
-        // 3. Attack weakened enemies
         for (const enemy of borderingEnemies) {
           const enemyMax = getMaxTroops(game, enemy);
           const enemyTroops = playerTroops(enemy);
@@ -2809,7 +2823,6 @@
           }
         }
 
-        // 4. Attack focus target or weakest enemy if over trigger ratio
         if (troopRatio >= triggerRatio && borderingEnemies.length > 0) {
           const target = borderingEnemies[0];
           const ok = sendLandAttack(game, myPlayer, target, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
