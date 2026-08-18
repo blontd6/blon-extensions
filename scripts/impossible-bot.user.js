@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blon Extension: Autoplay Bot
 // @namespace    http://tampermonkey.net/
-// @version      4.3.0
+// @version      4.1.0
 // @description  Autoplay extension
 // @author       blon
 // @match        *://openfront.io/*
@@ -37,9 +37,9 @@
         buildDefensePosts: true,
         allowAtomBombs: false, 
         allowHydrogenBombs: true, 
-        triggerRatio: 0.41,
+        triggerRatio: 0.46,
         reserveRatio: 0.42,
-        expandRatio: 0.38,
+        expandRatio: 0.42,
         botParallelism: 80,
         autoAttack: true,
         autoExpand: true,
@@ -50,16 +50,6 @@
         usePredeterminedSpawns: true,
         autoEmbargo: true,
         autoDonate: false,
-        autoDonateTroops: false,
-        autoDonateGold: false,
-        autoAlly: false,
-        autoAcceptAlly: false,
-        autoRenewAlly: false,
-        smartBetrayal: false,
-        feederSupplyLine: false,
-        aiBribery: false,
-        targetSync: false,
-        postNukeBlitz: true,
         autoBoat: true,
         autoWarship: true,
         tickIntervalMs: 350
@@ -94,63 +84,9 @@
         usePredeterminedSpawns: true,
         autoEmbargo: true,
         autoDonate: true,
-        autoDonateTroops: true,
-        autoDonateGold: false,
-        autoAlly: true,
-        autoAcceptAlly: true,
-        autoRenewAlly: true,
-        smartBetrayal: true,
-        feederSupplyLine: false,
-        aiBribery: true,
-        targetSync: false,
-        postNukeBlitz: true,
         autoBoat: true,
         autoWarship: true,
         tickIntervalMs: 800
-      },
-      team: {
-        id: "team",
-        name: "Team Meta (Feeder & Synergy)",
-        mode: "team",
-        maxCities: 25,
-        maxSilos: 3,
-        maxSams: 4,
-        samRatio: 0.35,
-        maxPorts: 2,
-        maxDefensePosts: 4,
-        buildCities: true,
-        buildSams: true,
-        buildSilos: true,
-        buildPorts: true,
-        buildDefensePosts: true,
-        allowAtomBombs: true,
-        allowHydrogenBombs: true,
-        triggerRatio: 0.48,
-        reserveRatio: 0.35,
-        expandRatio: 0.20,
-        botParallelism: 65,
-        autoAttack: true,
-        autoExpand: true,
-        autoDefend: true,
-        autoBuild: true,
-        autoNuke: true,
-        autoSpawn: true,
-        usePredeterminedSpawns: true,
-        autoEmbargo: true,
-        autoDonate: true,
-        autoDonateTroops: true,
-        autoDonateGold: true,
-        autoAlly: false,
-        autoAcceptAlly: false,
-        autoRenewAlly: false,
-        smartBetrayal: false,
-        feederSupplyLine: true,
-        aiBribery: false,
-        targetSync: true,
-        postNukeBlitz: true,
-        autoBoat: true,
-        autoWarship: true,
-        tickIntervalMs: 650
       }
     };
 
@@ -167,16 +103,6 @@
       usePredeterminedSpawns: true,
       autoEmbargo: true,
       autoDonate: false,
-      autoDonateTroops: true,
-      autoDonateGold: true,
-      autoAlly: true,
-      autoAcceptAlly: true,
-      autoRenewAlly: true,
-      smartBetrayal: true,
-      feederSupplyLine: true,
-      aiBribery: true,
-      targetSync: true,
-      postNukeBlitz: true,
       autoEmoji: false,
       autoBoat: true,
       autoWarship: true,
@@ -226,16 +152,9 @@
     }
 
     function syncAllUIControls() {
+      const is1v1 = botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1";
       const modeSelect = document.getElementById("blon-ext-mode-select");
-      if (modeSelect) {
-        if (botCfg.mode === "team" || botCfg.activePreset === "team") {
-          modeSelect.value = "team";
-        } else if (botCfg.mode === "1v1" || botCfg.mode === "v1v1" || botCfg.activePreset === "v1v1" || botCfg.activePreset === "1v1") {
-          modeSelect.value = "v1v1";
-        } else {
-          modeSelect.value = "solo";
-        }
-      }
+      if (modeSelect) modeSelect.value = is1v1 ? "v1v1" : "solo";
 
       const setCb = (id, val) => {
         const el = document.getElementById(id);
@@ -266,17 +185,6 @@
       setCb("blon-ext-feat-nuke", botCfg.autoNuke);
       setCb("blon-ext-nuke-atom", botCfg.allowAtomBombs);
       setCb("blon-ext-nuke-hbomb", botCfg.allowHydrogenBombs);
-
-      setCb("blon-ext-feat-ally", botCfg.autoAlly);
-      setCb("blon-ext-feat-accept-ally", botCfg.autoAcceptAlly);
-      setCb("blon-ext-feat-renew-ally", botCfg.autoRenewAlly);
-      setCb("blon-ext-feat-betray", botCfg.smartBetrayal);
-      setCb("blon-ext-feat-donate-troops", botCfg.autoDonateTroops);
-      setCb("blon-ext-feat-donate-gold", botCfg.autoDonateGold);
-      setCb("blon-ext-feat-feeder", botCfg.feederSupplyLine);
-      setCb("blon-ext-feat-ai-bribery", botCfg.aiBribery);
-      setCb("blon-ext-feat-target-sync", botCfg.targetSync);
-      setCb("blon-ext-feat-nuke-blitz", botCfg.postNukeBlitz);
 
       setSlider("blon-ext-max-cities-slider", "blon-ext-max-cities-val", botCfg.maxCities ?? 3);
       setSlider("blon-ext-max-defposts-slider", "blon-ext-max-defposts-val", botCfg.maxDefensePosts ?? 4);
@@ -471,12 +379,6 @@
         const id1 = typeof myPlayer.id === "function" ? myPlayer.id() : myPlayer.id;
         const id2 = typeof other.id === "function" ? other.id() : other.id;
         if (id1 && id1 === id2) return true;
-        if (typeof myPlayer.isFriendly === "function" && myPlayer.isFriendly(other)) return true;
-        if (typeof myPlayer.team === "function" && typeof other.team === "function") {
-          const t1 = myPlayer.team(), t2 = other.team();
-          if (t1 != null && t2 != null && t1 === t2) return true;
-        }
-        if (typeof myPlayer.isAlliedWith === "function" && myPlayer.isAlliedWith(other)) return true;
       } catch (e) {}
       return false;
     }
@@ -1278,15 +1180,8 @@
       lastGlobalEmojiTime: 0,
       lastDefensePostAttemptTime: 0,
       lastDonateAttemptTime: 0,
-      lastAllianceCheckTime: 0,
-      lastTroopDonationTime: 0,
-      lastGoldDonationTime: 0,
-      lastTargetSyncTime: 0,
-      lastBriberyTime: 0,
-      trackedNukeTargets: new Map(),
       lastExpandMs: 0,
       lastAttackMs: 0,
-      lastTeamAttackMs: 0,
       lastBoatFlankTime: 0,
       lastBoatDefenseTime: 0,
       lastCutAttackTime: 0,
@@ -1307,13 +1202,7 @@
         nukesLaunched: 0,
         expandsDone: 0,
         boatsSent: 0,
-        boatDefenses: 0,
-        alliancesProposed: 0,
-        alliancesAccepted: 0,
-        alliancesRenewed: 0,
-        alliancesBetrayed: 0,
-        troopsDonatedTotal: 0,
-        goldDonatedTotal: 0
+        boatDefenses: 0
       },
 
       start() {
@@ -1397,19 +1286,11 @@
         this.botAttackTroopsSent = 0;
 
         if (botCfg.autoEmbargo) this.handleAutoEmbargo(game, myPlayer);
+        if (botCfg.autoDonate && botCfg.mode !== "1v1") this.handleAutoDonate(game, myPlayer);
         if (botCfg.autoEmoji === true) this.handleEmojis(game, myPlayer);
-
-        if (botCfg.mode !== "1v1") {
-          this.handleAlliances(game, myPlayer);
-          this.handleSmartDonations(game, myPlayer);
-          if (botCfg.targetSync) this.handleTeamTargetSync(game, myPlayer);
-          if (botCfg.postNukeBlitz) this.handlePostNukeBlitz(game, myPlayer);
-        }
 
         if (botCfg.mode === "1v1") {
           this.tick1v1(game, myPlayer);
-        } else if (botCfg.mode === "team") {
-          this.tickTeam(game, myPlayer);
         } else {
           this.tickSolo(game, myPlayer);
         }
@@ -1422,13 +1303,6 @@
         if (botCfg.autoBuild) this.handleStructures(game, myPlayer);
         if (botCfg.autoNuke) this.handleNukes(game, myPlayer);
         if (botCfg.autoAttack || botCfg.autoExpand) this.handleAttacks(game, myPlayer);
-      },
-
-      tickTeam(game, myPlayer) {
-        if (botCfg.autoDefend && botCfg.buildDefensePosts) this.handleDefensePost(game, myPlayer);
-        if (botCfg.autoBuild) this.handleStructures(game, myPlayer);
-        if (botCfg.autoNuke) this.handleNukes(game, myPlayer);
-        if (botCfg.autoAttack || botCfg.autoExpand) this.handleTeamAttacks(game, myPlayer);
       },
 
       tick1v1(game, myPlayer) {
@@ -2411,69 +2285,7 @@
           const ok = sendPacket({ type: "build_unit", unit: bombType, tile: targetTile });
           if (ok) {
             this.stats.nukesLaunched++;
-            this.trackedNukeTargets.set(targetTile, now);
             if (botCfg.autoEmoji === true) this.sendEmojiTo(target, EMOJI_IDX.RADIATION);
-          }
-        }
-      },
-
-      handlePostNukeBlitz(game, myPlayer) {
-        const units = playerUnits(myPlayer);
-        const nukesInFlight = units.filter(u => {
-          const t = unitType(u);
-          return t === "Atom Bomb" || t === "Hydrogen Bomb" || t === "AtomBomb" || t === "HydrogenBomb";
-        });
-
-        for (const nuke of nukesInFlight) {
-          const tgt = typeof nuke.targetTile === "function" ? nuke.targetTile() : (nuke.targetTile ?? (typeof nuke.tileTarget === "function" ? nuke.tileTarget() : null));
-          if (tgt != null && !this.trackedNukeTargets.has(tgt)) {
-            this.trackedNukeTargets.set(tgt, Date.now());
-          }
-        }
-
-        if (this.trackedNukeTargets.size === 0) return;
-
-        const now = Date.now();
-        const myID = getMySmallID(myPlayer);
-        const myTr = playerTroops(myPlayer);
-        const maxTr = getMaxTroops(game, myPlayer);
-
-        for (const [tile, launchTime] of this.trackedNukeTargets.entries()) {
-          const matchingNuke = nukesInFlight.find(u => {
-            const tgt = typeof u.targetTile === "function" ? u.targetTile() : (u.targetTile ?? (typeof u.tileTarget === "function" ? u.tileTarget() : null));
-            return tgt === tile;
-          });
-
-          let nukeLanded = false;
-          if (matchingNuke) {
-            const isReached = typeof matchingNuke.reachedTarget === "function" ? matchingNuke.reachedTarget() : false;
-            const isAct = typeof matchingNuke.isActive === "function" ? matchingNuke.isActive() : true;
-            if (isReached || !isAct) {
-              nukeLanded = true;
-            }
-          } else {
-            const hasFallout = typeof game.hasFallout === "function" ? game.hasFallout(tile) : false;
-            if (hasFallout || (now - launchTime > 2000)) {
-              nukeLanded = true;
-            }
-          }
-
-          if (nukeLanded) {
-            const owner = typeof game.ownerID === "function" ? game.ownerID(tile) : null;
-            if (owner !== myID && myTr > maxTr * 0.25) {
-              const rushTroops = Math.floor(Math.min(myTr * 0.15, 100000));
-              if (rushTroops >= 500) {
-                const isShore = typeof game.isShore === "function" && game.isShore(tile);
-                if (isShore && botCfg.autoBoat) {
-                  sendPacket({ type: "boat", dst: tile, troops: rushTroops });
-                } else {
-                  sendPacket({ type: "attack", targetID: null, troops: rushTroops });
-                }
-              }
-            }
-            this.trackedNukeTargets.delete(tile);
-          } else if (now - launchTime > 35000) {
-            this.trackedNukeTargets.delete(tile);
           }
         }
       },
@@ -2490,348 +2302,32 @@
         }
       },
 
-      handleAlliances(game, myPlayer) {
+      handleAutoDonate(game, myPlayer) {
         const now = Date.now();
-        if (now - this.lastAllianceCheckTime < 2500) return;
-        this.lastAllianceCheckTime = now;
-
-        this.handleIncomingAllianceRequests(game, myPlayer);
-        this.handleAllianceProposals(game, myPlayer);
-        this.handleAllianceExtensions(game, myPlayer);
-        this.handleStrategicBetrayals(game, myPlayer);
-      },
-
-      handleIncomingAllianceRequests(game, myPlayer) {
-        if (typeof myPlayer.incomingAllianceRequests !== "function") return;
-        const reqs = myPlayer.incomingAllianceRequests() || [];
-        for (const req of reqs) {
-          const requestor = typeof req.requestor === "function" ? req.requestor() : null;
-          if (!requestor || !isAlive(requestor)) {
-            if (typeof req.reject === "function") req.reject();
-            continue;
-          }
-
-          if (typeof requestor.isTraitor === "function" && requestor.isTraitor()) {
-            if (typeof req.reject === "function") req.reject();
-            continue;
-          }
-
-          if (botCfg.autoAcceptAlly) {
-            const myTr = playerTroops(myPlayer);
-            const reqTr = playerTroops(requestor);
-            const activeAllies = typeof myPlayer.alliances === "function" ? (myPlayer.alliances() || []) : [];
-            const isThreat = reqTr > myTr * 1.2;
-            const hasSpace = activeAllies.length < 3;
-
-            if (isThreat || hasSpace) {
-              if (typeof req.accept === "function") req.accept();
-              else {
-                const rId = typeof requestor.id === "function" ? requestor.id() : requestor.id;
-                if (rId) sendPacket({ type: "allianceRequest", recipient: String(rId) });
-              }
-              this.stats.alliancesAccepted++;
-              if (botCfg.autoEmoji === true) this.sendEmojiTo(requestor, EMOJI_IDX.HANDSHAKE);
-              continue;
-            }
-          }
-
-          if (typeof req.reject === "function") req.reject();
-        }
-      },
-
-      handleAllianceProposals(game, myPlayer) {
-        if (!botCfg.autoAlly) return;
-        const bordering = getBorderingPlayerIDs(game, myPlayer);
-        const enemies = Array.from(bordering.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
-        
-        if (enemies.length >= 2) {
-          enemies.sort((a, b) => playerTroops(b) - playerTroops(a));
-          const strongestEnemy = enemies[0];
-          const canSend = typeof myPlayer.canSendAllianceRequest === "function" ? myPlayer.canSendAllianceRequest(strongestEnemy) : true;
-          const eId = typeof strongestEnemy.id === "function" ? strongestEnemy.id() : strongestEnemy.id;
-          if (canSend && eId) {
-            const ok = sendPacket({ type: "allianceRequest", recipient: String(eId) });
-            if (ok) {
-              this.stats.alliancesProposed++;
-              if (botCfg.autoEmoji === true) this.sendEmojiTo(strongestEnemy, EMOJI_IDX.HANDSHAKE);
-            }
-          }
-        }
-      },
-
-      handleAllianceExtensions(game, myPlayer) {
-        if (!botCfg.autoRenewAlly) return;
-        if (typeof myPlayer.alliances !== "function") return;
-        const alliances = myPlayer.alliances() || [];
-        for (const alliance of alliances) {
-          const partner = typeof alliance.other === "function" ? alliance.other(myPlayer) : null;
-          if (!partner || !isAlive(partner)) continue;
-          const partnerId = typeof partner.id === "function" ? partner.id() : partner.id;
-
-          const onlyOneAgreed = typeof alliance.onlyOneAgreedToExtend === "function" ? alliance.onlyOneAgreedToExtend() : false;
-          if (onlyOneAgreed && partnerId) {
-            sendPacket({ type: "allianceExtension", recipient: String(partnerId) });
-            this.stats.alliancesRenewed++;
-          }
-        }
-      },
-
-      handleStrategicBetrayals(game, myPlayer) {
-        if (!botCfg.smartBetrayal) return;
-        if (typeof myPlayer.alliances !== "function") return;
-        const alliances = myPlayer.alliances() || [];
-        const myTr = playerTroops(myPlayer);
-        if (myTr < 60000) return;
-
-        for (const alliance of alliances) {
-          const partner = typeof alliance.other === "function" ? alliance.other(myPlayer) : null;
-          if (!partner || !isAlive(partner)) continue;
-          const partnerTr = playerTroops(partner);
-          const partnerMax = getMaxTroops(game, partner);
-          const partnerId = typeof partner.id === "function" ? partner.id() : partner.id;
-
-          if (partnerTr < partnerMax * 0.15 && partnerTr < myTr * 0.25 && partnerId) {
-            sendPacket({ type: "breakAlliance", recipient: String(partnerId) });
-            this.stats.alliancesBetrayed++;
-          }
-        }
-      },
-
-      handleSmartDonations(game, myPlayer) {
-        this.handleTroopDonations(game, myPlayer);
-        this.handleGoldDonations(game, myPlayer);
-      },
-
-      handleTroopDonations(game, myPlayer) {
-        if (!botCfg.autoDonateTroops && !botCfg.feederSupplyLine) return;
-        const now = Date.now();
-        if (now - this.lastTroopDonationTime < 1600) return;
-        this.lastTroopDonationTime = now;
+        if (now - this.lastDonateAttemptTime < 3000) return;
+        this.lastDonateAttemptTime = now;
 
         const myTr = playerTroops(myPlayer);
-        const maxTr = getMaxTroops(game, myPlayer);
-        if (myTr < maxTr * 0.30) return;
+        if (myTr < 50000) return;
 
         const all = getAllPlayers(game);
-        const myID = getMySmallID(myPlayer);
-        const teammates = all.filter(p => isAlive(p) && isFriendly(myPlayer, p) && getMySmallID(p) !== myID);
-        if (teammates.length === 0) return;
+        const alliesInCombat = all.filter(p => {
+          if (!isFriendly(myPlayer, p) || !isAlive(p)) return false;
+          const id1 = typeof myPlayer.id === "function" ? myPlayer.id() : myPlayer.id;
+          const id2 = typeof p.id === "function" ? p.id() : p.id;
+          if (id1 === id2) return false;
+          const inAtk = typeof p.incomingAttacks === "function" ? p.incomingAttacks() : [];
+          return inAtk.length > 0;
+        });
 
-        if (botCfg.autoDonateTroops) {
-          for (const ally of teammates) {
-            const incoming = typeof ally.incomingAttacks === "function" ? ally.incomingAttacks() : [];
-            if (incoming.length > 0) {
-              const totalInc = incoming.reduce((s, a) => s + (typeof a.troops === "function" ? Number(a.troops()) : Number(a.troops || 0)), 0);
-              const allyTr = playerTroops(ally);
-              const allyMax = getMaxTroops(game, ally);
-              const space = Math.max(0, allyMax - allyTr);
-              if (space > 500) {
-                const deficit = Math.max(500, totalInc - allyTr);
-                const sendAmt = Math.floor(Math.min(deficit * 1.1, space, myTr * 0.25));
-                if (sendAmt > 400) {
-                  const allyId = typeof ally.id === "function" ? ally.id() : ally.id;
-                  if (allyId) {
-                    const ok = sendPacket({ type: "donate_troops", recipient: String(allyId), troops: sendAmt });
-                    if (ok) {
-                      this.stats.troopsDonatedTotal += sendAmt;
-                      if (botCfg.autoEmoji === true) this.sendEmojiTo(ally, EMOJI_IDX.HEART);
-                      return;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (botCfg.feederSupplyLine) {
-          const bordering = getBorderingPlayerIDs(game, myPlayer);
-          const enemies = Array.from(bordering.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
-          const isLandlocked = enemies.length === 0;
-          const isCapped = myTr >= maxTr * 0.85;
-
-          if (isLandlocked || isCapped) {
-            teammates.sort((a, b) => (playerTroops(a) / Math.max(1, getMaxTroops(game, a))) - (playerTroops(b) / Math.max(1, getMaxTroops(game, b))));
-            const bestRecipient = teammates[0];
-            const recMax = getMaxTroops(game, bestRecipient);
-            const recTr = playerTroops(bestRecipient);
-            const availableSpace = Math.max(0, recMax - recTr);
-
-            if (availableSpace > 1000) {
-              const donation = Math.floor(Math.min(myTr * 0.20, availableSpace));
-              if (donation >= 1000) {
-                const rId = typeof bestRecipient.id === "function" ? bestRecipient.id() : bestRecipient.id;
-                if (rId) {
-                  const ok = sendPacket({ type: "donate_troops", recipient: String(rId), troops: donation });
-                  if (ok) {
-                    this.stats.troopsDonatedTotal += donation;
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-
-      handleGoldDonations(game, myPlayer) {
-        const now = Date.now();
-        if (now - this.lastGoldDonationTime < 2800) return;
-        this.lastGoldDonationTime = now;
-
-        const myGold = playerGold(myPlayer);
-        if (myGold < 200000) return;
-
-        const all = getAllPlayers(game);
-        const myID = getMySmallID(myPlayer);
-        const teammates = all.filter(p => isAlive(p) && isFriendly(myPlayer, p) && getMySmallID(p) !== myID);
-
-        if (botCfg.autoDonateGold && myGold >= 1000000) {
-          for (const ally of teammates) {
-            const units = playerUnits(ally);
-            const hasSilo = units.some(u => unitType(u) === "Missile Silo");
-            const allyGold = playerGold(ally);
-            if (hasSilo && allyGold < 750000) {
-              const gift = Math.min(myGold - 500000, 750000 - allyGold);
-              if (gift >= 50000) {
-                const aId = typeof ally.id === "function" ? ally.id() : ally.id;
-                if (aId) {
-                  const ok = sendPacket({ type: "donate_gold", recipient: String(aId), gold: Math.floor(gift) });
-                  if (ok) {
-                    this.stats.goldDonatedTotal += Math.floor(gift);
-                    if (botCfg.autoEmoji === true) this.sendEmojiTo(ally, EMOJI_IDX.GOLD);
-                    return;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (botCfg.autoDonateGold && myGold >= 400000) {
-          for (const ally of teammates) {
-            const units = playerUnits(ally);
-            const numCities = units.filter(u => unitType(u) === "City").length;
-            const allyGold = playerGold(ally);
-            if (numCities === 0 && allyGold < 125000) {
-              const aId = typeof ally.id === "function" ? ally.id() : ally.id;
-              if (aId) {
-                const ok = sendPacket({ type: "donate_gold", recipient: String(aId), gold: 125000 });
-                if (ok) {
-                  this.stats.goldDonatedTotal += 125000;
-                  return;
-                }
-              }
-            }
-          }
-        }
-
-        if (botCfg.aiBribery && botCfg.mode === "solo" && myGold >= 200000) {
-          const bordering = getBorderingPlayerIDs(game, myPlayer);
-          const aiNeighbors = Array.from(bordering.values()).filter(p => isAlive(p) && isBot(p) && !isFriendly(myPlayer, p));
-          if (aiNeighbors.length > 0) {
-            const candidate = aiNeighbors[0];
-            const cId = typeof candidate.id === "function" ? candidate.id() : candidate.id;
-            if (cId) {
-              const ok = sendPacket({ type: "donate_gold", recipient: String(cId), gold: 5000 });
-              if (ok) {
-                this.stats.goldDonatedTotal += 5000;
-              }
-            }
-          }
-        }
-      },
-
-      handleTeamTargetSync(game, myPlayer) {
-        const now = Date.now();
-        if (now - this.lastTargetSyncTime < 6000) return;
-        this.lastTargetSyncTime = now;
-
-        const bordering = getBorderingPlayerIDs(game, myPlayer);
-        const enemies = Array.from(bordering.values()).filter(p => isAlive(p) && !isFriendly(myPlayer, p));
-        if (enemies.length === 0) return;
-
-        enemies.sort((a, b) => playerTroops(b) - playerTroops(a));
-        const priorityTarget = enemies[0];
-        const tId = typeof priorityTarget.id === "function" ? priorityTarget.id() : priorityTarget.id;
-        if (tId) {
-          sendPacket({ type: "targetPlayer", target: String(tId) });
-        }
-      },
-
-      handleTeamAttacks(game, myPlayer) {
-        const myTroops = playerTroops(myPlayer);
-        if (myTroops <= 0) return;
-
-        const maxTroops = getMaxTroops(game, myPlayer);
-        const triggerRatio = botCfg.triggerRatio ?? 0.48;
-        const reserveRatio = botCfg.reserveRatio ?? 0.35;
-        const expandRatio = botCfg.expandRatio ?? 0.20;
-        const effReserve = getEffectiveReserveRatio(game, myPlayer, reserveRatio);
-        const troopRatio = myTroops / maxTroops;
-
-        const borderingMap = getBorderingPlayerIDs(game, myPlayer);
-        const borderingPlayers = Array.from(borderingMap.values()).filter(p => isAlive(p));
-        const borderingEnemies = borderingPlayers.filter(p => !isFriendly(myPlayer, p));
-        borderingEnemies.sort((a, b) => playerTroops(a) - playerTroops(b));
-
-        if (botCfg.autoAttack) {
-          const borderingBots = borderingEnemies.filter(p => isBot(p));
-          if (borderingBots.length > 0) {
-            if (this.attackBots(borderingBots, game, myPlayer, myTroops, maxTroops, reserveRatio)) return;
-          }
-        }
-
-        if (botCfg.autoExpand && hasBorderWithTerraNullius(game, myPlayer)) {
-          const expandThrottle = 650;
-          const now = Date.now();
-          if (now - this.lastExpandMs >= expandThrottle) {
-            const expandReserve = maxTroops * expandRatio;
-            const available = myTroops - expandReserve;
-            if (available > 0) {
-              const troopsToSend = Math.floor(Math.min(available, Math.max(maxTroops * 0.04, myTroops * 0.30)));
-              if (troopsToSend >= Math.max(1, maxTroops * 0.02)) {
-                const ok = sendPacket({ type: "attack", targetID: null, troops: troopsToSend });
-                if (ok) {
-                  this.lastExpandMs = now;
-                  this.stats.attacksSent++;
-                  this.stats.expandsDone++;
-                  this.stats.troopsSentTotal += troopsToSend;
-                  return;
-                }
-              }
-            }
-          }
-        }
-
-        if (!botCfg.autoAttack) return;
-        if (troopRatio < effReserve) return;
-
-        const now = Date.now();
-        if (now - this.lastTeamAttackMs < 1000) return;
-
-        for (const enemy of borderingEnemies) {
-          const enemyMax = getMaxTroops(game, enemy);
-          const enemyTroops = playerTroops(enemy);
-          if (enemyTroops < enemyMax * 0.20 && enemyTroops < myTroops * 1.5) {
-            const ok = sendLandAttack(game, myPlayer, enemy, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
-            if (ok) {
-              this.lastTeamAttackMs = now;
-              this.stats.attacksSent++;
-              if (botCfg.autoEmoji === true) this.sendEmojiTo(enemy, EMOJI_IDX.DEVIL);
-              return;
-            }
-          }
-        }
-
-        if (troopRatio >= triggerRatio && borderingEnemies.length > 0) {
-          const target = borderingEnemies[0];
-          const ok = sendLandAttack(game, myPlayer, target, myTroops, maxTroops, this.botAttackTroopsSent, reserveRatio);
-          if (ok) {
-            this.lastTeamAttackMs = now;
-            this.stats.attacksSent++;
-            if (botCfg.autoEmoji === true) this.sendEmojiTo(target, EMOJI_IDX.ANGRY);
-            return;
-          }
+        if (alliesInCombat.length === 0) return;
+        alliesInCombat.sort((a, b) => playerTroops(a) - playerTroops(b));
+        const ally = alliesInCombat[0];
+        const allyId = typeof ally.id === "function" ? ally.id() : ally.id;
+        const donateAmount = Math.floor(myTr * 0.15);
+        if (donateAmount > 500 && allyId) {
+          sendPacket({ type: "donate_troops", recipient: String(allyId), troops: donateAmount });
+          if (botCfg.autoEmoji === true) this.sendEmojiTo(ally, EMOJI_IDX.HEART);
         }
       },
 
@@ -2885,7 +2381,6 @@
             <select id="blon-ext-mode-select" style="background:#222;color:#fff;border:1px solid #444;border-radius:3px;font-size:10px;padding:3px 6px;cursor:pointer;">
                 <option value="v1v1" ${botCfg.activePreset === 'v1v1' || botCfg.mode === '1v1' ? 'selected' : ''}>1v1 Sweaty Meta</option>
                 <option value="solo" ${botCfg.activePreset === 'solo' || botCfg.mode === 'solo' ? 'selected' : ''}>Solo Impossible AI</option>
-                <option value="team" ${botCfg.activePreset === 'team' || botCfg.mode === 'team' ? 'selected' : ''}>Team Meta (Feeder & Synergy)</option>
             </select>
         </div>
 
@@ -2913,35 +2408,6 @@
         </label>
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:pointer;color:#aaa;font-size:11px;">
             <input type="checkbox" id="blon-ext-feat-emoji" ${botCfg.autoEmoji === true ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Emoji Reactions
-        </label>
-
-        <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Diplomacy & Team Synergy</div>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-ally" ${botCfg.autoAlly !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Propose Strategic Alliances (Flank Securing)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-accept-ally" ${botCfg.autoAcceptAlly !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Accept Inbound Strategic Alliances
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-renew-ally" ${botCfg.autoRenewAlly !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Auto-Renew Expiring Treaties
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-betray" ${botCfg.smartBetrayal !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Smart Betrayal (Annex Nuked/Crushed Allies)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-donate-troops" ${botCfg.autoDonateTroops !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Smart Troop Bailouts (Deficit-Matching)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-feeder" ${botCfg.feederSupplyLine !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Feeder Supply-Line (Stream Troops When Capped/Landlocked)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-donate-gold" ${botCfg.autoDonateGold !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Fund Ally Nukes & Cities ($Gold)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:7px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-ai-bribery" ${botCfg.aiBribery !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> AI Nation Gold Bribery (+50 Buffer Relations)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:pointer;color:#aaa;font-size:11px;">
-            <input type="checkbox" id="blon-ext-feat-target-sync" ${botCfg.targetSync !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Synchronize Team Target (Focus Fire)
         </label>
 
         <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">Structure & Defense</div>
@@ -3007,9 +2473,6 @@
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
                 <input type="checkbox" id="blon-ext-nuke-hbomb" ${botCfg.allowHydrogenBombs !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Hydrogen Bombs ($5M)
             </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#aaa;font-size:11px;">
-                <input type="checkbox" id="blon-ext-feat-nuke-blitz" ${botCfg.postNukeBlitz !== false ? "checked" : ""} style="cursor:pointer;margin:0;"> Post-Nuke Blitzkrieg (Rush Fallout)
-            </label>
         </div>
 
         <div style="color:${themeColor};font-size:11px;font-weight:700;margin-top:12px;margin-bottom:8px;">AI Tuning</div>
@@ -3061,16 +2524,6 @@
         ["blon-ext-feat-embargo", "autoEmbargo"],
         ["blon-ext-feat-boat", "autoBoat"],
         ["blon-ext-feat-emoji", "autoEmoji"],
-        ["blon-ext-feat-ally", "autoAlly"],
-        ["blon-ext-feat-accept-ally", "autoAcceptAlly"],
-        ["blon-ext-feat-renew-ally", "autoRenewAlly"],
-        ["blon-ext-feat-betray", "smartBetrayal"],
-        ["blon-ext-feat-donate-troops", "autoDonateTroops"],
-        ["blon-ext-feat-feeder", "feederSupplyLine"],
-        ["blon-ext-feat-donate-gold", "autoDonateGold"],
-        ["blon-ext-feat-ai-bribery", "aiBribery"],
-        ["blon-ext-feat-target-sync", "targetSync"],
-        ["blon-ext-feat-nuke-blitz", "postNukeBlitz"],
         ["blon-ext-build-master", "autoBuild"],
         ["blon-ext-build-cities", "buildCities"],
         ["blon-ext-build-sams", "buildSams"],
@@ -3145,8 +2598,8 @@
     api.registerExtension({
       id: "impossible-bot",
       name: "Autoplay Bot",
-      version: "4.3.0",
-      description: "Autoplay extension featuring OpenFront 1v1 Meta, Solo Impossible AI, and Team Feeder/Synergy",
+      version: "4.1.0",
+      description: "Autoplay extension",
       author: "blon",
       tabLabel: "Auto",
       tabContent: renderTab,
