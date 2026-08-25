@@ -6,5 +6,13 @@
     "author": "blon",
     "version": "4.1.0",
     "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/impossible-bot.user.js"
+  },
+  {
+    "id": "tampermonkey-loader",
+    "name": "Tampermonkey Loader",
+    "description": "Extension loader",
+    "author": "blon",
+    "version": "1.0.0",
+    "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/blon-tampermonkey-loader.user.js"
   }
 ]
