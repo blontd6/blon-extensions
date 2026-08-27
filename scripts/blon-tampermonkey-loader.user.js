@@ -244,6 +244,40 @@
     } catch (e) {}
   }
 
+  function deleteScript(id) {
+    const scripts = getSavedScripts();
+    if (scripts[id]) {
+      delete scripts[id];
+      saveScripts(scripts);
+    }
+    removeFromBlonExtensions(id);
+    if (window.__blonExecutedScripts) {
+      window.__blonExecutedScripts.delete(id);
+    }
+    if (window.__blonAPI && typeof window.__blonAPI.unregisterExtension === "function") {
+      window.__blonAPI.unregisterExtension(id);
+    }
+  }
+
+  window.addEventListener("blon-extension-uninstalled", (e) => {
+    if (e.detail && e.detail.id) {
+      const id = e.detail.id;
+      const scripts = getSavedScripts();
+      if (scripts[id]) {
+        delete scripts[id];
+        saveScripts(scripts);
+      }
+      removeFromBlonExtensions(id);
+      if (window.__blonExecutedScripts) {
+        window.__blonExecutedScripts.delete(id);
+      }
+      const panel = document.getElementById("tab-ext-tampermonkey-loader-panel");
+      if (panel && window.__blonAPI) {
+        renderLoaderTab(panel, window.__blonAPI);
+      }
+    }
+  });
+
   function loadPersistedScripts() {
     const scripts = getSavedScripts();
     for (const id of Object.keys(scripts)) {
@@ -264,11 +298,11 @@
     const textarea = document.createElement("textarea");
     textarea.id = "blon-tm-script-input";
     textarea.placeholder = "Paste Tampermonkey extension (.user.js) code or script URL here...";
-    textarea.style.cssText = "width:100%;height:220px;box-sizing:border-box;background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:11px;line-height:1.4;resize:vertical;outline:none;margin-bottom:8px;";
+    textarea.style.cssText = "width:100%;height:180px;box-sizing:border-box;background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:11px;line-height:1.4;resize:vertical;outline:none;margin-bottom:8px;";
 
     const loadBtn = document.createElement("button");
     loadBtn.id = "blon-tm-load-btn";
-    loadBtn.textContent = "Load";
+    loadBtn.textContent = "Load Script";
     loadBtn.style.cssText = "width:100%;background:#111;color:#aaa;border:1px solid #444;padding:8px 0;border-radius:4px;font-weight:bold;font-size:11px;cursor:pointer;font-family:monospace;transition:background 0.15s, color 0.15s;box-sizing:border-box;";
 
     loadBtn.addEventListener("mouseover", () => {
@@ -329,15 +363,13 @@
         loadBtn.textContent = "✓ Loaded!";
         loadBtn.style.color = (api && api.cfg && api.cfg.guiColor) || "#00ff66";
         setTimeout(() => {
-          loadBtn.textContent = "Load";
-          loadBtn.style.color = "#aaa";
-          loadBtn.disabled = false;
-        }, 1500);
+          renderLoaderTab(panel, api);
+        }, 1000);
       } catch (err) {
         loadBtn.textContent = "Failed to load";
         loadBtn.style.color = "#ff4444";
         setTimeout(() => {
-          loadBtn.textContent = "Load";
+          loadBtn.textContent = "Load Script";
           loadBtn.style.color = "#aaa";
           loadBtn.disabled = false;
         }, 2000);
@@ -346,6 +378,42 @@
 
     panel.appendChild(textarea);
     panel.appendChild(loadBtn);
+
+    // List of loaded scripts
+    const scripts = getSavedScripts();
+    const scriptIds = Object.keys(scripts);
+    if (scriptIds.length > 0) {
+      const listHeader = document.createElement("div");
+      listHeader.style.cssText = "color:#aaa;font-size:10px;font-weight:700;margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.05em;";
+      listHeader.textContent = `Loaded Scripts (${scriptIds.length})`;
+      panel.appendChild(listHeader);
+
+      const listContainer = document.createElement("div");
+      listContainer.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+
+      scriptIds.forEach(id => {
+        const item = scripts[id];
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;justify-content:space-between;align-items:center;background:#181818;border:1px solid #333;border-radius:4px;padding:6px 8px;";
+        row.innerHTML = `
+          <div style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px;">
+            <div style="color:#00ff66;font-weight:700;font-size:11px;">${item.name || id}</div>
+            <div style="color:#777;font-size:9px;">v${item.version || '1.0'} &nbsp;·&nbsp; ${id}</div>
+          </div>
+          <button class="blon-tm-del-btn" style="background:#2a1111;border:1px solid #ff4444;color:#ff6666;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;cursor:pointer;">Uninstall</button>
+        `;
+
+        const delBtn = row.querySelector(".blon-tm-del-btn");
+        delBtn.addEventListener("click", () => {
+          deleteScript(id);
+          renderLoaderTab(panel, api);
+        });
+
+        listContainer.appendChild(row);
+      });
+
+      panel.appendChild(listContainer);
+    }
   }
 
   function init(api) {
