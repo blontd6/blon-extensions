@@ -14,5 +14,13 @@
     "author": "blon",
     "version": "1.0.0",
     "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/blon-tampermonkey-loader.user.js"
+  },
+  {
+    "id": "hash-ghost",
+    "name": "Catch Winner Intent",
+    "description": "Catches and blocks the game over winner intent/event from being sent to the server.",
+    "author": "blon",
+    "version": "6.1.0",
+    "installUrl": "https://raw.githubusercontent.com/blontd6/blon-extensions/main/scripts/hash-ghost.user.js"
   }
 ]
